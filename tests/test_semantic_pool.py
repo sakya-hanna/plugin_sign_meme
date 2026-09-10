@@ -192,6 +192,43 @@ def test_upsert_preserves_done_embedding_on_unchanged_text():
         assert entry3["embedding_status"] == "pending"
 
 
+def test_identify_by_category_not_custom_flag():
+    """防回归(零修改方案): 上游 SemanticImage.from_dict/to_dict 只保留
+    dataclass 白名单字段,会静默丢弃 is_sign_template 等自定义标记。
+    识别必须只依赖官方必活字段: category + relative_path。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        sync.upsert(_template(), _image(td))
+        meta = sync.storage.load_metadata(pack)
+        eid = next(iter(meta["images"]))
+        # 模拟上游规范化往返: 白名单字段之外的都被丢掉
+        del meta["images"][eid]["is_sign_template"]
+        del meta["images"][eid]["sign_template_id"]
+        del meta["images"][eid]["sign_template_name"]
+        sync.storage.save_metadata(pack, meta)
+        # 幂等 upsert 仍应识别为自家记录: 不产生重复、保留原状态字段
+        r = sync.upsert(_template(), _image(td))
+        assert r["ok"]
+        meta2 = sync.storage.load_metadata(pack)
+        assert len(meta2["images"]) == 1, "识别失败会产生重复记录"
+        assert sync.remove("t1")["ok"]
+        meta3 = sync.storage.load_metadata(pack)
+        assert len(meta3["images"]) == 0, "remove 也必须靠 category+path 识别"
+
+
+def test_is_sign_entry_unit():
+    """is_sign_entry 纯函数: category 与路径前缀双条件。"""
+    from backend.semantic_pool import is_sign_entry
+
+    assert is_sign_entry({"category": SIGN_CATEGORY, "relative_path": "memes/举牌模板/x.png"})
+    assert not is_sign_entry({"category": "selected", "relative_path": "memes/selected/x.png"})
+    assert not is_sign_entry({"category": SIGN_CATEGORY, "relative_path": "memes/other/x.png"})
+    assert not is_sign_entry({})
+    assert not is_sign_entry(None)
+
+
 if __name__ == "__main__":
     test_build_entry_shape()
     test_upsert_and_remove_roundtrip()
@@ -201,4 +238,6 @@ if __name__ == "__main__":
     test_remove_restores_pack_totals()
     test_upsert_rejects_blank_caption_without_orphan_file()
     test_upsert_preserves_done_embedding_on_unchanged_text()
-    print("semantic pool tests PASS (8)")
+    test_identify_by_category_not_custom_flag()
+    test_is_sign_entry_unit()
+    print("semantic pool tests PASS (10)")

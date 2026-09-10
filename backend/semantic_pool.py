@@ -121,11 +121,36 @@ def _default_pack_dir(root: Path) -> Path | None:
     return pack_dir if pack_dir.is_dir() else None
 
 
+def is_sign_entry(item: Any) -> bool:
+    """判断 metadata 记录是否为举牌模板——零修改方案的唯一识别入口。
+
+    只依赖官方必活字段(category/relative_path):上游 SemanticImage
+    from_dict/to_dict 白名单会静默丢弃 is_sign_template 等自定义标记。
+    双条件: category == 举牌模板 且 relative_path 在该分类目录下。
+    """
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("category") or "") != SIGN_CATEGORY:
+        return False
+    rel = str(item.get("relative_path") or "").replace("\\", "/")
+    return rel.startswith(f"memes/{SIGN_CATEGORY}/")
+
+
+def _sign_template_id_from_item(item: dict) -> str:
+    """从记录提取模板 id: 优先自定义字段(若存活),否则从路径恢复。"""
+    tid = str(item.get(SIGN_ID_FIELD) or "").strip()
+    if tid:
+        return tid
+    rel = str(item.get("relative_path") or "").replace("\\", "/")
+    name = rel.rsplit("/", 1)[-1]
+    return name[:-4] if name.endswith(".png") else ""
+
+
 def _find_sign_entries(metadata: dict) -> dict[str, dict]:
     return {
         eid: item
         for eid, item in (metadata.get("images") or {}).items()
-        if isinstance(item, dict) and item.get(SIGN_FLAG)
+        if is_sign_entry(item)
     }
 
 
@@ -220,7 +245,7 @@ class SemanticPoolSync:
         # embedding_status 打回 pending,已建好的 FAISS 向量被标记失效。
         # (向量按文本哈希对齐;语义文本变了才需要真正重嵌。)
         previous = images.get(entry_id)
-        if isinstance(previous, dict) and previous.get(SIGN_FLAG):
+        if isinstance(previous, dict) and is_sign_entry(previous):
             normalize_tags = models.normalize_tags
             text_unchanged = (
                 str(previous.get("caption") or "") == str(entry.get("caption") or "")
@@ -253,9 +278,11 @@ class SemanticPoolSync:
         metadata = storage.load_metadata(pack_dir)
         removed = []
         for eid, item in list((metadata.get("images") or {}).items()):
-            if isinstance(item, dict) and item.get(SIGN_FLAG) and str(
-                item.get(SIGN_ID_FIELD) or ""
-            ) == str(template_id):
+            if (
+                isinstance(item, dict)
+                and is_sign_entry(item)
+                and _sign_template_id_from_item(item) == str(template_id)
+            ):
                 del metadata["images"][eid]
                 removed.append(eid)
                 rel = str(item.get("relative_path") or "")
@@ -281,8 +308,9 @@ class SemanticPoolSync:
         metadata = storage.load_metadata(pack_dir)
         existing = _find_sign_entries(metadata)
         by_template = {
-            str(v.get(SIGN_ID_FIELD) or ""): (eid, v) for eid, v in existing.items()
+            _sign_template_id_from_item(v): (eid, v) for eid, v in existing.items()
         }
+        by_template.pop("", None)
         ops = {"added": [], "updated": [], "removed": []}
         if mode == "integrated":
             want_ids = {str(t.get("id")) for t in templates}
