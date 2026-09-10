@@ -104,13 +104,17 @@ def test_response_parse_and_coexistence_flag():
     resp2 = _Resp('{"reply":"a","sign_text":"b"}')
     asyncio.run(handle_llm_response(p, ev2, resp2))
     assert resp2.completion_text == '{"reply":"a","sign_text":"b"}'
-    # integrated 不解析
+    # integrated 也剥离(2026-09-10 22:04 回归修复):历史样本可能诱发模型
+    # 输出 JSON 协议,不剥离会原样发给用户。剥离结果写入本插件 extra,
+    # 不写官方旧 key(防官方旧路径消费导致双发)。
     p3 = _FakePlugin("integrated")
     ev3 = _Extra()
     resp3 = _Resp('{"reply":"回答","sign_text":"好"}')
     asyncio.run(handle_llm_response(p3, ev3, resp3))
-    assert resp3.completion_text == '{"reply":"回答","sign_text":"好"}'
+    assert resp3.completion_text == "回答"
     assert "meme_manager_sign_text" not in ev3
+    assert ev3["sign_meme_integrated_model_sign_text"] == "好"
+    assert ev3["meme_manager_sign_structured"] is True
 
 
 def test_decorating_renders_once_and_integrated_skips(monkeypatch=None):

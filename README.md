@@ -64,6 +64,47 @@ astrbot_plugin_sign_meme/
 - `_is_pack_enabled` 对受控 pack 一律返回 False，即便 registry 中 enabled；
 - 实测：把 selection_rules 恶意改成指向 sign-meme-templates 后，resolve 仍回退到 manosaba-001，不会发送空白底图。
 
+## 零修改对接官方 meme_manager（feature 分支，2026-09-10）
+
+integrated 模式重写为**只依赖官方原版 meme_manager**，不要求用户打任何补丁：
+
+### 依赖面（全部为官方公开函数/数据，v4.15.5 逐文件 diff 核实）
+
+| 用途 | 官方入口 |
+|---|---|
+| 语义记录读写 | `semantic_storage.load_metadata / save_metadata / scan_images / semantic_metadata_is_complete` |
+| entry_id/文本哈希 | `semantic_models.semantic_entry_id / text_hash / normalize_tags` |
+| FAISS 建索引 | `semantic_index.build_index`（force / target_entry_ids） |
+| 嵌入 provider | 官方数据文件 `provider_selection.json`（只读）→ AstrBot 核心 `get_provider_by_id` |
+
+### 四个发送口子的拦截（时序依据：官方钩子 priority=99999/0，AstrBot 按 priority 降序执行）
+
+| 口子 | 场景 | 拦截点 |
+|---|---|---|
+| A | tool 模式 `&&meme:id&&` 标记 | response(100000) 剥标记 |
+| B | tool 模式 default_id 自动回退 | response(100000) 清空 |
+| C | llm/emotion 模式 selected_ids | response(99998)（官方 99999 检索之后）移除 |
+| D | 流式兼容路径 | decorating(100000) 兜底清空 + 成品图追加 |
+
+识别依据：官方候选 extra（`meme_manager_semantic_candidates`）中的 `category == "举牌模板"`。**不得**依赖 `is_sign_template` 等自定义字段——官方 `SemanticImage.from_dict/to_dict` 白名单会静默丢弃它们。
+
+### 已实测的官方行为（v4.15.5）
+
+- 语义化任务对 `manual_override=True` / `provenance∈{manual,mixed}` 的记录**无条件跳过 caption 覆盖**（含 force），`semantic_task.py:1847`；本插件写入即带这些标记；
+- 官方 `category_analysis_is_current` 对 manual 记录放行，索引不受影响；
+- 占位描述 vs 真实描述对检索分数影响：5 组查询平均分差 -0.007、方向不一致、全部高于 0.25 召回阈值 → **写入时自带真实 category_description 仅为最佳实践，非硬性要求**。
+
+### 兼容声明与降级
+
+- 声明兼容：官方 meme_manager v4.15.x（`backend/semantic_*` 模块函数签名与 extras key 未变区间）；
+- 启动探测失败 → integrated 自动按 standalone 运行，插件页红色提示；
+- 嵌入 provider 与索引 manifest 三元组不一致时拒绝重建向量（宁缺勿错）。
+
+### 上游升级风险与自检
+
+若未来官方版本改动钩子 priority 语义、extras key 名、`search_index` 候选字段，拦截可能失效（最坏情况：发出空白举牌底图）。升级官方 meme_manager 后请发一条"评价"类消息自检：文字回复若附带**带牌面文字**的举牌图即正常；若收到**空白底图**请立即切回 standalone 并反馈 issue。
+
+
 ### 2026-09-10 完整验收结果（全部通过）
 
 ```text
@@ -154,7 +195,21 @@ web_api 路由在进程启动时注册，改 handler 后插件 reload 无效，�
 7. 空 caption/tags 的模板在拷贝镜像文件**之前**拒绝入池——此类记录过不了
    semantic_caption_is_complete,会连带挡住整个 pack 的检索门禁,且拷贝后
    拒绝会留下无记录的孤儿镜像文件（测试
-   test_upsert_rejects_blank_caption_without_orphan_file）。
+   test_upsert_rejects_blank_caption_without_orphan_file）;
+8. integrated 渲染必须调用 main.py 真实公开接口
+   `render_for_meme_manager(template_id, sign_text, request_id=)`——
+   不要调用 service 层的 generate_with_template 或写不存在的方法名
+   （2026-09-10 22:04 QQ 实测回归: AttributeError 导致本轮无图,且模型
+   模仿历史样本输出的 {"reply","sign_text"} JSON 协议无人剥离,原样发给
+   用户。修复三件套: 方法名+getattr 防护降级 / standalone_events 兜底
+   剥离 JSON 并把 sign_text 写入 sign_meme_integrated_model_sign_text /
+   main.py 100000 钩子内剥离先于拦截管线执行）。回归测试:
+   test_incident_20260910_json_leak_and_render_crash、
+   test_render_interface_missing_degrades_cleanly;
+9. 钩子派发顺序敏感: handle_llm_response(剥离)必须先于
+   on_llm_response_first(拦截渲染)——渲染管线要从剥离产物里读
+   sign_text,顺序颠倒会让复用永远落空（第 8 条修复的一部分,
+   test_main_hooks 的矩阵断言不覆盖顺序,改动时对照 main.py 内注释）。
 
 ## 开发与回归注意事项
 

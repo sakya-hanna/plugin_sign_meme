@@ -15,8 +15,9 @@ from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, file_response, json_response, request
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from .backend import compat
+from .backend import integrated_events, standalone_events
 from .backend.service import SignMemeError, SignMemeService
-from .backend import standalone_events
 
 PLUGIN_NAME = "sign_meme"
 ALT_PLUGIN_NAME = "astrbot_plugin_sign_meme"
@@ -31,6 +32,8 @@ class SignMemePlugin(Star):
         self.context = context
         self.config = config
         self.service.sign_mode_provider = lambda: self.sign_mode
+        self._compat_upstream_missing = False
+        self._probe_upstream_compat()
         self._register_routes()
         self.logger.info(
             "event=plugin_initialized data_dir=%s sign_mode=%s",
@@ -72,38 +75,86 @@ class SignMemePlugin(Star):
 
     @property
     def self_managed_sign_events(self) -> bool:
-        """能力标志:meme_manager 旧链路据此让位(避免双注入/双发图)。"""
+        """integrated 模式下旧链路必须完全让位。
+
+        返回 False 时官方 meme_manager 会继续:
+        1) 注入旧 JSON 协议 prompt(与语义 && 标记协议冲突);
+        2) _parse_sign_meme_response 命中 JSON → 走旧渲染链路发举牌图;
+        3) 语义 referenced_ids 为空 → default fallback 自动选普通表情;
+        结果同轮双图(2026-09-10 19:05 实测回归)。
+        standalone 模式本就自管,同样让位。
+        """
         return True
+
+    async def llm_generate(self, prompt: str, *, provider_id: str = "", model: str = ""):
+        """供 integrated 渲染管线调用 AstrBot Context LLM。
+
+        provider_id/model 留空时由 _generate_sign_text 先行解析,
+        此处兜底经 context 指定 chat_provider_id。
+        """
+        kwargs: dict = {"prompt": prompt}
+        if provider_id:
+            kwargs["chat_provider_id"] = provider_id
+        if model:
+            kwargs["model"] = model
+        return await self.context.llm_generate(**kwargs)
+
+    def _effective_sign_mode(self) -> str:
+        """实际生效模式: integrated 且上游可用才走 integrated,否则降级 standalone。"""
+        mode = self.sign_mode
+        if mode == "integrated" and getattr(self, "_compat_upstream_missing", False):
+            return "standalone"
+        return mode
+
+    def _probe_upstream_compat(self) -> None:
+        """启动时探测官方 meme_manager(零修改对接的前提)。"""
+        self._compat_upstream_missing = False
+        self._compat_upstream_version = ""
+        try:
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            info = compat.probe_upstream(
+                Path(get_astrbot_data_path()) / "plugins", data_root
+            )
+            if info is None:
+                self._compat_upstream_missing = True
+                self.logger.warning(
+                    "event=compat_upstream_missing mode=integrated 将降级 standalone"
+                )
+                return
+            self._compat_upstream_version = info.version
+            self.logger.info(
+                "event=compat_upstream_detected version=%s pack=%s",
+                info.version or "unknown",
+                info.default_pack_dir.name if info.default_pack_dir else "none",
+            )
+        except Exception as exc:
+            self._compat_upstream_missing = True
+            self.logger.warning("event=compat_probe_failed error=%s", exc)
 
     async def _rebuild_pool_vectors(self, entry_ids: list[str] | None = None) -> dict:
         """对接模式:按 entry 增量重建主 pack FAISS 索引(需要 embedding provider)。"""
         try:
-            import sys
-            plugins_root = str(Path(get_astrbot_data_path()) / "plugins")
-            if plugins_root not in sys.path:
-                sys.path.insert(0, plugins_root)
-            from astrbot_plugin_meme_manager.backend.semantic_index import (
-                EmbeddingAdapter, build_index,
-            )
-            from astrbot_plugin_meme_manager.backend import semantic_storage
-            from astrbot_plugin_meme_manager.backend.pack_resolver import resolve_pack_id
-            pack_id = resolve_pack_id()
+            api = compat.public_api()
+            if api is None:
+                return {"ok": False, "reason": "upstream_unavailable"}
+            _, _, semantic_index = api
+            build_index = semantic_index.build_index
+            pack_id = self._compat_default_pack_id()
             if not pack_id:
                 return {"ok": False, "reason": "no_default_pack"}
-            pack_dir = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager" / "packs" / pack_id
-            provider = None
-            try:
-                provider = self.context.get_using_provider()
-            except Exception:
-                pass
-            if provider is None:
-                return {"ok": False, "reason": "no_embedding_provider"}
-            embedding = EmbeddingAdapter(provider)
-            if not embedding.ready:
-                return {"ok": False, "reason": "embedding_not_ready"}
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            pack_dir = data_root / "packs" / pack_id
+            resolved = compat.resolve_embedding_provider_for_pack(
+                self.context, pack_dir, data_root
+            )
+            if resolved is None:
+                # 与索引 manifest 不一致或 provider 不可用:宁可不重建,
+                # 也不能用错模型写坏向量(search_index 会静默拒绝)
+                return {"ok": False, "reason": "embedding_provider_mismatch"}
+            provider, embedding = resolved
             result = await build_index(
                 pack_dir,
-                Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager",
+                data_root,
                 pack_id,
                 embedding,
                 target_entry_ids=set(entry_ids) if entry_ids else None,
@@ -112,6 +163,19 @@ class SignMemePlugin(Star):
         except Exception as exc:
             self.logger.error("event=sign_pool_vector_rebuild_failed error=%s", type(exc).__name__)
             return {"ok": False, "reason": str(exc)}
+
+    def _compat_default_pack_id(self) -> str:
+        """默认 pack id(经 compat 探测;失败回退 selection_rules 解析)。"""
+        try:
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            info = compat.probe_upstream(
+                Path(get_astrbot_data_path()) / "plugins", data_root
+            )
+            if info and info.default_pack_dir:
+                return info.default_pack_dir.name
+        except Exception:
+            pass
+        return ""
 
     async def _after_mode_switch(self) -> None:
         """模式切换后:reconcile 语义池 + 触发向量增量。"""
@@ -340,8 +404,15 @@ class SignMemePlugin(Star):
     async def api_get_mode(self):
         if not self._admin_required():
             return self._error("需要管理员登录", 403)
+        effective = self._effective_sign_mode()
         return json_response({
             "sign_mode": self.sign_mode,
+            "effective_sign_mode": effective,
+            "compat_status": (
+                "ok" if effective == "integrated"
+                else ("downgraded" if self.sign_mode == "integrated" else "standalone")
+            ),
+            "compat_upstream_version": getattr(self, "_compat_upstream_version", ""),
             "sign_text_llm_provider": self.sign_text_llm_provider,
             "sign_text_llm_model": self.sign_text_llm_model,
         })
@@ -411,22 +482,46 @@ class SignMemePlugin(Star):
         """返回与 meme_manager 语义图片记录兼容的当前模板快照。"""
         return self.service.active_semantic_context()
 
-    # ---- 独立模式事件链路(standalone 模式激活) ----
+    # ---- 事件链路(分模式派发;priority 矩阵见 backend/integrated_events.py) ----
+    # standalone: 独立协议注入/渲染,不依赖上游
+    # integrated: 前置拦截管线,零修改对接官方 meme_manager
+    #             (response 100000 拦截 → 官方 99999 → response 99998
+    #              移除 selected → decorating 100000 兜底清空+追加成品图)
 
     @filter.on_llm_request()
     async def on_llm_request_sign(self, event: AstrMessageEvent, req: ProviderRequest):
-        await standalone_events.handle_llm_request(self, event, req)
+        if self._effective_sign_mode() == "standalone":
+            await standalone_events.handle_llm_request(self, event, req)
+        elif hasattr(self, "_compat_upstream_missing") and self._compat_upstream_missing:
+            await standalone_events.handle_llm_request(self, event, req)
 
-    @filter.on_llm_response()
-    async def on_llm_response_sign(self, event: AstrMessageEvent, response):
+    @filter.on_llm_response(priority=100000)
+    async def on_llm_response_first_sign(self, event: AstrMessageEvent, response):
+        # 顺序敏感: JSON 协议剥离必须先于 integrated 拦截管线——
+        # 剥离出的 sign_text 会写入 extra 供渲染管线直接复用
+        # (2026-09-10 22:04 回归: 顺序颠倒导致复用永远落空)。
         await standalone_events.handle_llm_response(self, event, response)
+        if self._effective_sign_mode() == "integrated":
+            await integrated_events.on_llm_response_first(self, event, response)
 
-    @filter.on_decorating_result()
-    async def on_decorating_result_sign(self, event: AstrMessageEvent):
+    @filter.on_llm_response(priority=99998)
+    async def on_llm_response_second_sign(self, event: AstrMessageEvent, response):
+        if self._effective_sign_mode() == "integrated":
+            # 签名是 (plugin, event, llm_generate): response 不是第三个参数
+            # (2026-09-10 修正: 原误传会把 response 当 llm_generate 调用)。
+            await integrated_events.on_llm_response_second(self, event)
+
+    @filter.on_decorating_result(priority=100000)
+    async def on_decorating_result_first_sign(self, event: AstrMessageEvent):
+        mode = self._effective_sign_mode()
+        if mode == "integrated":
+            await integrated_events.on_decorating_result_first(self, event)
         await standalone_events.handle_decorating_result(self, event)
 
     @filter.after_message_sent()
     async def after_message_sent_sign(self, event: AstrMessageEvent):
+        if self._effective_sign_mode() == "integrated":
+            await integrated_events.after_message_sent(self, event)
         await standalone_events.handle_after_message_sent(self, event)
 
     async def cleanup_generated(self, path: str) -> bool:

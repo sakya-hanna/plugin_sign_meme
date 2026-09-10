@@ -61,33 +61,17 @@ def _plugin_data_root() -> Path:
 
 
 def _mm_imports():
-    """延迟导入 meme_manager 后端,插件未安装时返回 None。
+    """经 compat 层导入上游公开模块(零修改对接的统一入口)。
 
-    两条路径: AstrBot 运行时(astrbot 包可导入) → 标准插件目录;
-    纯 pytest 环境 → 沿 plugin_data 上溯找 plugins/astrbot_plugin_meme_manager。
+    兼容旧调用方: 返回 (storage, models) 二元组;不可用时均为 None。
     """
-    import sys
-    candidates = []
-    try:
-        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-        candidates.append(Path(get_astrbot_data_path()) / "plugins")
-    except Exception:
-        pass
-    here = Path(__file__).resolve().parent.parent
-    # sign_meme 位于 plugins/astrbot_plugin_sign_meme/backend/ → plugins 根是 parent.parent
-    candidates.append(here.parent)
-    for plugins_root in candidates:
-        if (plugins_root / "astrbot_plugin_meme_manager" / "backend" / "semantic_storage.py").is_file():
-            s = str(plugins_root)
-            if s not in sys.path:
-                sys.path.insert(0, s)
-            break
-    try:
-        from astrbot_plugin_meme_manager.backend import semantic_storage
-        from astrbot_plugin_meme_manager.backend import semantic_models
-        return semantic_storage, semantic_models
-    except Exception:
+    from . import compat
+
+    api = compat.public_api()
+    if api is None:
         return None, None
+    storage, models, _ = api
+    return storage, models
 
 
 def _default_pack_dir(root: Path) -> Path | None:
@@ -121,11 +105,36 @@ def _default_pack_dir(root: Path) -> Path | None:
     return pack_dir if pack_dir.is_dir() else None
 
 
+def is_sign_entry(item: Any) -> bool:
+    """判断 metadata 记录是否为举牌模板——零修改方案的唯一识别入口。
+
+    只依赖官方必活字段(category/relative_path):上游 SemanticImage
+    from_dict/to_dict 白名单会静默丢弃 is_sign_template 等自定义标记。
+    双条件: category == 举牌模板 且 relative_path 在该分类目录下。
+    """
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("category") or "") != SIGN_CATEGORY:
+        return False
+    rel = str(item.get("relative_path") or "").replace("\\", "/")
+    return rel.startswith(f"memes/{SIGN_CATEGORY}/")
+
+
+def _sign_template_id_from_item(item: dict) -> str:
+    """从记录提取模板 id: 优先自定义字段(若存活),否则从路径恢复。"""
+    tid = str(item.get(SIGN_ID_FIELD) or "").strip()
+    if tid:
+        return tid
+    rel = str(item.get("relative_path") or "").replace("\\", "/")
+    name = rel.rsplit("/", 1)[-1]
+    return name[:-4] if name.endswith(".png") else ""
+
+
 def _find_sign_entries(metadata: dict) -> dict[str, dict]:
     return {
         eid: item
         for eid, item in (metadata.get("images") or {}).items()
-        if isinstance(item, dict) and item.get(SIGN_FLAG)
+        if is_sign_entry(item)
     }
 
 
@@ -157,7 +166,7 @@ def build_sign_entry(
         "manual_visible_text": "",
         "category_review_status": "manual_confirmed",
         "category_description": "举牌模板(生成型表情包:命中后渲染文字再发送)",
-        "provenance": "sign_meme",
+        "provenance": "manual",
         "updated_at": template.get("source_updated_at") or "",
         SIGN_FLAG: True,
         SIGN_ID_FIELD: str(template.get("id") or ""),
@@ -220,7 +229,7 @@ class SemanticPoolSync:
         # embedding_status 打回 pending,已建好的 FAISS 向量被标记失效。
         # (向量按文本哈希对齐;语义文本变了才需要真正重嵌。)
         previous = images.get(entry_id)
-        if isinstance(previous, dict) and previous.get(SIGN_FLAG):
+        if isinstance(previous, dict) and is_sign_entry(previous):
             normalize_tags = models.normalize_tags
             text_unchanged = (
                 str(previous.get("caption") or "") == str(entry.get("caption") or "")
@@ -253,9 +262,11 @@ class SemanticPoolSync:
         metadata = storage.load_metadata(pack_dir)
         removed = []
         for eid, item in list((metadata.get("images") or {}).items()):
-            if isinstance(item, dict) and item.get(SIGN_FLAG) and str(
-                item.get(SIGN_ID_FIELD) or ""
-            ) == str(template_id):
+            if (
+                isinstance(item, dict)
+                and is_sign_entry(item)
+                and _sign_template_id_from_item(item) == str(template_id)
+            ):
                 del metadata["images"][eid]
                 removed.append(eid)
                 rel = str(item.get("relative_path") or "")
@@ -281,8 +292,9 @@ class SemanticPoolSync:
         metadata = storage.load_metadata(pack_dir)
         existing = _find_sign_entries(metadata)
         by_template = {
-            str(v.get(SIGN_ID_FIELD) or ""): (eid, v) for eid, v in existing.items()
+            _sign_template_id_from_item(v): (eid, v) for eid, v in existing.items()
         }
+        by_template.pop("", None)
         ops = {"added": [], "updated": [], "removed": []}
         if mode == "integrated":
             want_ids = {str(t.get("id")) for t in templates}
@@ -308,19 +320,8 @@ class SemanticPoolSync:
         return {"ok": True, **ops}
 
     # ---- 向量增量(异步,由调用方在事务提交后调度) ----
+    # 实际重建由 main.py:_rebuild_pool_vectors 经 compat 层完成。
 
     async def rebuild_vectors(self, entry_ids: list[str] | None = None) -> dict:
-        """按 entry 增量重建 FAISS;entry_ids=None 时重建整包。"""
-        if not self.available():
-            return {"ok": False, "reason": "meme_manager 不可用"}
-        pack_dir = _default_pack_dir(self.root)
-        try:
-            from astrbot_plugin_meme_manager.backend.semantic_index import (
-                EmbeddingAdapter, build_index,
-            )
-            # embedding provider 由调用方注入(需要 AstrBot context);
-            # 这里不做,向量重建统一走 meme_manager 管理页已有的
-            # "重建"入口/或由 main.py 在运行时触发。此处仅提供纯函数入口。
-            return {"ok": False, "reason": "embedding_provider_required"}
-        except Exception as exc:
-            return {"ok": False, "reason": str(exc)}
+        """占位入口: 请使用 plugin._rebuild_pool_vectors(compat 化路径)。"""
+        return {"ok": False, "reason": "use_main_rebuild_pool_vectors"}

@@ -192,6 +192,121 @@ def test_upsert_preserves_done_embedding_on_unchanged_text():
         assert entry3["embedding_status"] == "pending"
 
 
+def test_identify_by_category_not_custom_flag():
+    """防回归(零修改方案): 上游 SemanticImage.from_dict/to_dict 只保留
+    dataclass 白名单字段,会静默丢弃 is_sign_template 等自定义标记。
+    识别必须只依赖官方必活字段: category + relative_path。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        sync.upsert(_template(), _image(td))
+        meta = sync.storage.load_metadata(pack)
+        eid = next(iter(meta["images"]))
+        # 模拟上游规范化往返: 白名单字段之外的都被丢掉
+        del meta["images"][eid]["is_sign_template"]
+        del meta["images"][eid]["sign_template_id"]
+        del meta["images"][eid]["sign_template_name"]
+        sync.storage.save_metadata(pack, meta)
+        # 幂等 upsert 仍应识别为自家记录: 不产生重复、保留原状态字段
+        r = sync.upsert(_template(), _image(td))
+        assert r["ok"]
+        meta2 = sync.storage.load_metadata(pack)
+        assert len(meta2["images"]) == 1, "识别失败会产生重复记录"
+        assert sync.remove("t1")["ok"]
+        meta3 = sync.storage.load_metadata(pack)
+        assert len(meta3["images"]) == 0, "remove 也必须靠 category+path 识别"
+
+
+def test_is_sign_entry_unit():
+    """is_sign_entry 纯函数: category 与路径前缀双条件。"""
+    from backend.semantic_pool import is_sign_entry
+
+    assert is_sign_entry({"category": SIGN_CATEGORY, "relative_path": "memes/举牌模板/x.png"})
+    assert not is_sign_entry({"category": "selected", "relative_path": "memes/selected/x.png"})
+    assert not is_sign_entry({"category": SIGN_CATEGORY, "relative_path": "memes/other/x.png"})
+    assert not is_sign_entry({})
+    assert not is_sign_entry(None)
+
+
+def test_written_record_matches_official_normalization():
+    """写入记录必须经得起官方 SemanticImage 白名单往返,且自带非空
+    category_description(避免官方占位文本"请添加描述"稀释向量),
+    manual_override/provenance 标记齐全(官方语义化任务跳过依据)。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        r = sync.upsert(_template(), _image(td))
+        assert r["ok"]
+        api = sync.storage, sync.models
+        assert all(api), "容器/宿主环境必须有上游模块"
+        from astrbot_plugin_meme_manager.backend.semantic_models import SemanticImage
+
+        meta = sync.storage.load_metadata(pack)
+        eid, entry = next(iter(meta["images"].items()))
+        # 1) 白名单往返: 官方规范化后核心字段存活
+        round_trip = SemanticImage.from_dict(entry).to_dict()
+        assert round_trip["category"] == SIGN_CATEGORY
+        assert round_trip["relative_path"].startswith(f"memes/{SIGN_CATEGORY}/")
+        # 2) 描述策略: category_description 必非空(占位符会进向量文本)
+        assert str(entry.get("category_description") or "").strip()
+        assert "请添加描述" not in str(entry.get("category_description"))
+        # 3) manual 标记: 官方语义化任务按此跳过人工记录
+        assert entry.get("manual_override") is True
+        assert entry.get("provenance") in ("manual", "mixed", "sign_meme")
+        # 4) 向量文本组成(官方 vector_text 模板)不含占位符
+        vector_text = SemanticImage.from_dict(entry).vector_text
+        assert "请添加描述" not in vector_text
+        assert SIGN_CATEGORY in vector_text
+
+
+def test_reconcile_repairs_tampered_records():
+    """防回归(零修改方案): 官方语义化任务/手动编辑可能篡改举牌记录
+    (caption 覆盖、context_hash 失配)。启动 reconcile 必须按模板库修复,
+    且修复动作只出现在 updated 列表。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        sync.upsert(_template(), _image(td))
+        # 模拟上游篡改: caption 被改 + category_description 清空
+        meta = sync.storage.load_metadata(pack)
+        eid = next(iter(meta["images"]))
+        meta["images"][eid]["caption"] = "被官方任务覆盖的描述"
+        meta["images"][eid]["category_description"] = ""
+        meta["images"][eid]["manual_override"] = False
+        sync.storage.save_metadata(pack, meta)
+
+        img = _image(td)
+        resolver = lambda t: img
+        r = sync.reconcile("integrated", [_template()], resolver)
+        assert r["ok"]
+        assert "t1" in r["updated"], f"篡改记录必须被修复: {r}"
+
+        meta2 = sync.storage.load_metadata(pack)
+        entry = meta2["images"][eid]
+        assert entry["caption"] == "评价场景", "caption 必须恢复为模板库值"
+        assert entry["category_description"], "description 必须恢复"
+        assert entry["manual_override"] is True, "manual 标记必须恢复"
+
+
+def test_reconcile_no_tamper_is_noop():
+    """未篡改时 reconcile 不应产生多余的 updated 抖动。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        img = _image(td)
+        resolver = lambda t: img
+        sync.reconcile("integrated", [_template()], resolver)
+        r2 = sync.reconcile("integrated", [_template()], resolver)
+        assert r2["ok"] and r2["added"] == [] and r2["removed"] == []
+        # updated 允许出现(幂等 upsert 语义),但记录内容必须稳定
+        meta = sync.storage.load_metadata(pack)
+        assert len(meta["images"]) == 1
+
+
 if __name__ == "__main__":
     test_build_entry_shape()
     test_upsert_and_remove_roundtrip()
@@ -201,4 +316,9 @@ if __name__ == "__main__":
     test_remove_restores_pack_totals()
     test_upsert_rejects_blank_caption_without_orphan_file()
     test_upsert_preserves_done_embedding_on_unchanged_text()
-    print("semantic pool tests PASS (8)")
+    test_identify_by_category_not_custom_flag()
+    test_is_sign_entry_unit()
+    test_written_record_matches_official_normalization()
+    test_reconcile_repairs_tampered_records()
+    test_reconcile_no_tamper_is_noop()
+    print("semantic pool tests PASS (13)")

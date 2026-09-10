@@ -81,6 +81,14 @@ def test_plugin_page_bridge_contract():
     assert 'plugin_page_bridge_unavailable' in page
 
 
+def test_page_shows_compat_status():
+    """零修改方案: 页面必须展示兼容状态(降级提示),消费 mode API 新字段。"""
+    page = (Path(__file__).parent.parent / "pages" / "举牌模板" / "index.html").read_text(encoding="utf-8")
+    assert "compat_status" in page, "页面必须读取 compat_status"
+    assert "compat_upstream_version" in page, "页面必须展示上游版本"
+    assert "已降级" in page, "必须有降级提示文案"
+
+
 def test_create_template_mirrors_to_meme_manager_pack():
     with TemporaryDirectory() as td:
         root = Path(td)
