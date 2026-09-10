@@ -1,10 +1,11 @@
+import _bootstrap  # noqa: F401  路径引导(直跑时脚本目录自动入 path;pytest 由 conftest 处理)
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PIL import Image
 
-from service import SignMemeError, SignMemeService
+from backend.service import SignMemeError, SignMemeService
 
 
 def test_create_activate_generate_and_cleanup():
@@ -74,7 +75,7 @@ def test_single_line_auto_fit_prefers_no_wrap():
 
 
 def test_plugin_page_bridge_contract():
-    page = (Path(__file__).parent / "pages" / "举牌模板" / "index.html").read_text(encoding="utf-8")
+    page = (Path(__file__).parent.parent / "pages" / "举牌模板" / "index.html").read_text(encoding="utf-8")
     assert '<script src="/api/plugin/page/bridge-sdk.js"></script>' in page
     assert 'upload: async()=>({})' not in page
     assert 'plugin_page_bridge_unavailable' in page

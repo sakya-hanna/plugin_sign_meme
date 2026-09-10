@@ -1,13 +1,9 @@
 """sign_meme 独立链路 + meme_manager 让位互斥测试。"""
+import _bootstrap  # noqa: F401  路径引导(直跑时脚本目录自动入 path;pytest 由 conftest 处理)
 import asyncio
 import types
-from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "astrbot_plugin_meme_manager"))
-
-from standalone_events import (  # noqa: E402
+from backend.standalone_events import (
     SIGN_PROMPT_MARKER,
     build_sign_prompt_suffix,
     handle_decorating_result,
@@ -118,14 +114,16 @@ def test_response_parse_and_coexistence_flag():
 
 
 def test_decorating_renders_once_and_integrated_skips(monkeypatch=None):
-    import standalone_events as se
+    from backend import standalone_events as se
     from astrbot.core.message.components import Image as _Img  # 容器内可用
 
     p = _FakePlugin("standalone")
     ev = _Extra()
     ev["meme_manager_sign_text"] = "举牌！"
     ev["_result"] = _Result()
-    se.Path = Path  # 确保用真实 Path
+    from pathlib import Path as _P
+
+    se.Path = _P  # 确保用真实 Path
     # 伪造 temporary_path 存在
     import tempfile, os
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -149,6 +147,8 @@ def test_decorating_renders_once_and_integrated_skips(monkeypatch=None):
 
 def test_meme_manager_yields_to_self_managed():
     # 直接验证让位逻辑(不导入完整插件,模拟 mixin 方法所在类)
+    import sys
+
     sys.path.insert(0, "/AstrBot/data/plugins")
     from astrbot_plugin_meme_manager.mixins.event_handlers import EventHandlerMixin
 

@@ -1,12 +1,10 @@
 """语义池同步(对接模式)测试: upsert/remove/reconcile 与元数据形态。"""
+import _bootstrap  # noqa: F401  路径引导(直跑时脚本目录自动入 path;pytest 由 conftest 处理)
 import json
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from semantic_pool import (  # noqa: E402
+from backend.semantic_pool import (
     SIGN_CATEGORY, SIGN_FLAG, SIGN_ID_FIELD,
     SemanticPoolSync, build_sign_entry,
 )

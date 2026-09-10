@@ -16,8 +16,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 try:
     from .meme_manager_mirror import MemeManagerMirror
-except ImportError:  # direct local test execution
-    from meme_manager_mirror import MemeManagerMirror
+except ImportError:  # 直接以文件方式运行(非包上下文)
+    from backend.meme_manager_mirror import MemeManagerMirror
 
 
 class SignMemeError(ValueError):
@@ -46,7 +46,7 @@ class SignMemeService:
         try:
             from .semantic_pool import SemanticPoolSync
         except ImportError:
-            from semantic_pool import SemanticPoolSync
+            from backend.semantic_pool import SemanticPoolSync
         # 对接模式语义池同步;standalone 模式下所有方法为 no-op
         self.semantic_pool = SemanticPoolSync(self.data_dir.parent / "meme_manager", logger=None)
         self.sign_mode_provider = None  # main.py 注入: 返回当前 sign_mode 的 callable
@@ -376,7 +376,7 @@ class SignMemeService:
     def _font(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         candidates = [
             self.font_path,
-            Path(__file__).resolve().parent / "fonts" / "NotoSansSC-Regular.ttf",
+            Path(__file__).resolve().parent.parent / "fonts" / "NotoSansSC-Regular.ttf",
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         ]
         for path in candidates:

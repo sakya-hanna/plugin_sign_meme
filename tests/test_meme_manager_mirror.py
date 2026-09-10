@@ -1,3 +1,4 @@
+import _bootstrap  # noqa: F401  路径引导(直跑时脚本目录自动入 path;pytest 由 conftest 处理)
 import hashlib
 import json
 from io import BytesIO
@@ -6,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 from PIL import Image
 
-from meme_manager_mirror import MemeManagerMirror
+from backend.meme_manager_mirror import MemeManagerMirror
 
 
 PACK_ID = "sign-meme-templates"

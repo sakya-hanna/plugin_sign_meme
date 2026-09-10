@@ -15,8 +15,8 @@ from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, file_response, json_response, request
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
-from .service import SignMemeError, SignMemeService
-from . import standalone_events
+from .backend.service import SignMemeError, SignMemeService
+from .backend import standalone_events
 
 PLUGIN_NAME = "sign_meme"
 ALT_PLUGIN_NAME = "astrbot_plugin_sign_meme"

@@ -55,8 +55,8 @@ def _plugin_data_root() -> Path:
         from astrbot.core.utils.astrbot_path import get_astrbot_data_path
         return Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
     except Exception:
-        # 测试环境: 相对布局
-        here = Path(__file__).resolve().parent
+        # 测试环境: 相对布局(本文件位于 plugins/astrbot_plugin_sign_meme/backend/)
+        here = Path(__file__).resolve().parent.parent
         return here.parent / "data" / "plugin_data" / "meme_manager"
 
 
@@ -73,8 +73,8 @@ def _mm_imports():
         candidates.append(Path(get_astrbot_data_path()) / "plugins")
     except Exception:
         pass
-    here = Path(__file__).resolve().parent
-    # sign_meme 位于 plugins/<本插件>/ → plugins 根是 parent
+    here = Path(__file__).resolve().parent.parent
+    # sign_meme 位于 plugins/astrbot_plugin_sign_meme/backend/ → plugins 根是 parent.parent
     candidates.append(here.parent)
     for plugins_root in candidates:
         if (plugins_root / "astrbot_plugin_meme_manager" / "backend" / "semantic_storage.py").is_file():

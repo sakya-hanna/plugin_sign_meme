@@ -14,6 +14,36 @@
 
 当前版本暂不提供聊天指令、AI 自动创建模板或多模板语义选择。
 
+## 目录结构（2026-09-10 重构，对齐 meme_manager 的 backend/tests 布局）
+
+```text
+astrbot_plugin_sign_meme/
+├── main.py                  # 插件入口(AstrBot 加载器约定,必须在根目录)
+├── metadata.yaml            # 插件元数据(加载器约定)
+├── _conf_schema.json        # 配置 schema(加载器约定)
+├── pages/                   # 插件页(加载器约定,根目录名硬编码)
+├── backend/                 # 核心业务逻辑
+│   ├── service.py           #   模板管理/渲染服务/镜像与语义池调度
+│   ├── meme_manager_mirror.py  # meme_manager 镜像目录事务同步
+│   ├── semantic_pool.py     #   对接模式语义池同步(upsert/remove/reconcile)
+│   └── standalone_events.py #   standalone 模式事件链路(协议注入/渲染/清理)
+├── tests/                   # 测试(pytest 或直跑均可)
+│   ├── conftest.py          #   路径引导(对齐 meme_manager/tests 同名约定)
+│   ├── _bootstrap.py        #   直跑模式 sys.path 引导
+│   └── test_*.py
+├── fonts/                   # 运行时字体(gitignore,部署时自备 NotoSansSC)
+└── data/                    # 运行时数据(gitignore)
+```
+
+防回归要点：
+- `main.py`/`metadata.yaml`/`_conf_schema.json`/`pages/` 的位置是 AstrBot
+  加载器与 Plugin Pages 的硬编码约定，不可移动；
+- `backend/semantic_pool.py` 与 `backend/service.py` 中存在基于
+  `__file__` 的相对路径计算(插件根 = `parent.parent`)，移动文件时必须
+  同步修改；
+- 测试统一 `from backend.xxx import`，路径引导只依赖 `conftest.py`
+  (pytest)与 `_bootstrap.py`(直跑)，不要再在测试文件里散写 sys.path。
+
 ## meme_manager 目录镜像（2026-09-10）
 
 每个举牌模板现在会自动镜像到 meme_manager 的既有目录机制：
