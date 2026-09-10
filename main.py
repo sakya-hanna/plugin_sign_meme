@@ -386,8 +386,15 @@ class SignMemePlugin(Star):
     async def api_get_mode(self):
         if not self._admin_required():
             return self._error("需要管理员登录", 403)
+        effective = self._effective_sign_mode()
         return json_response({
             "sign_mode": self.sign_mode,
+            "effective_sign_mode": effective,
+            "compat_status": (
+                "ok" if effective == "integrated"
+                else ("downgraded" if self.sign_mode == "integrated" else "standalone")
+            ),
+            "compat_upstream_version": getattr(self, "_compat_upstream_version", ""),
             "sign_text_llm_provider": self.sign_text_llm_provider,
             "sign_text_llm_model": self.sign_text_llm_model,
         })

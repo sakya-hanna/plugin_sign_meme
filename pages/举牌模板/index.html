@@ -133,19 +133,32 @@
   draw(); load();
   (async function modeBar(){
     const cur=document.querySelector('#mode-current'), desc=document.querySelector('#mode-desc');
-    const render=(m)=>{
-      cur.textContent = m==='integrated' ? '对接表情包检索' : '独立使用';
-      desc.textContent = m==='integrated'
-        ? '模板已进入表情包语义检索池：命中后由独立模型生成牌面文字再渲染发送。切换请到 AstrBot 插件配置。'
-        : '本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。切换请到 AstrBot 插件配置。';
+    const render=(d)=>{
+      const m=d.sign_mode, compat=d.compat_status||'standalone';
+      let label, hint;
+      if(m==='integrated' && compat==='downgraded'){
+        label='对接检索（已降级为独立模式）';
+        hint='未检测到表情包管理器（meme_manager），对接模式不可用，已临时按独立模式运行。请安装官方 meme_manager 后重启 AstrBot。';
+        cur.style.color='#b0563c';
+      }else if(m==='integrated'){
+        label='对接表情包检索';
+        const ver=d.compat_upstream_version?`（检测到 meme_manager ${d.compat_upstream_version}）`:'';
+        hint=`模板已进入表情包语义检索池：命中后自动生成牌面文字再渲染发送${ver}。切换请到 AstrBot 插件配置。`;
+        cur.style.color='#2f7d5c';
+      }else{
+        label='独立使用';
+        hint='本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。切换请到 AstrBot 插件配置。';
+        cur.style.color='#2f7d5c';
+      }
+      cur.textContent=label; desc.textContent=hint;
     };
-    try{ const raw=await api('/mode'); const d=raw?.data||raw||{}; render(d.sign_mode); }catch(e){ cur.textContent='读取失败'; }
+    try{ const raw=await api('/mode'); render(raw?.data||raw||{}); }catch(e){ cur.textContent='读取失败'; }
     const btn=document.querySelector('#mode-reconcile');
     if(btn) btn.onclick=async()=>{
       btn.disabled=true; desc.textContent='正在同步…';
       try{ const raw=await api('/mode/reconcile',{method:'POST',body:{}}); const d=raw?.data||raw||{};
         desc.textContent='已同步：'+JSON.stringify(d.reconcile||d);
-        try{ const m=await api('/mode'); render((m?.data||m||{}).sign_mode); }catch(_){}
+        try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
       }catch(e){ desc.textContent=e.message||'同步失败'; }
       btn.disabled=false;
     };

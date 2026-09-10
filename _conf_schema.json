@@ -4,7 +4,7 @@
     "type": "string",
     "default": "standalone",
     "options": ["standalone", "integrated"],
-    "hint": "standalone=独立使用：本插件自己的命中链路（协议注入+激活模板渲染），不依赖表情包管理器；integrated=对接模式：举牌模板进入表情包管理器的语义检索池，命中后二次生成牌面文字并渲染发送"
+    "hint": "standalone=独立使用：本插件自己的命中链路（协议注入+激活模板渲染），不依赖表情包管理器；integrated=对接模式：举牌模板进入表情包管理器的语义检索池，命中后二次生成牌面文字并渲染发送。对接模式使用官方原版 meme_manager（零修改）；检测到上游缺失时会自动按 standalone 运行"
   },
   "sign_text_llm_provider": {
     "description": "对接模式：牌面文字模型 Provider",
