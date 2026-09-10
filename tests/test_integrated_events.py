@@ -84,7 +84,8 @@ class _FakePlugin:
     def sign_mode(self):
         return self.config.sign_mode
 
-    async def generate_with_template(self, template_id, sign_text, *, request_id=None):
+    async def render_for_meme_manager(self, template_id, sign_text, *, request_id=None):
+        """与 main.py 真实公开接口同名同签名(防接口漂移回归)。"""
         self.render_calls.append((template_id, sign_text))
         if not self._render_ok:
             raise RuntimeError("render failed")
@@ -244,6 +245,58 @@ def test_cleanup_after_sent():
     assert ev.get_extra(ie.EXTRA_RENDERED_PATH) is None
 
 
+# ---------- 事故回归: 2026-09-10 22:04 QQ 实测 ----------
+
+def test_incident_20260910_json_leak_and_render_crash():
+    """完整复刻事故载荷: 模型输出 JSON 协议残留 + &&meme:&& 标记。
+
+    事故: 渲染调用了不存在的 plugin.generate_with_template → AttributeError,
+    且无人剥离 JSON 协议文本 → 原始协议原样发给用户。
+    修复后: JSON 先行剥离(main.py 钩子内顺序) → 复用残留 sign_text(好女孩)
+    → 按模板渲染成功 → 文本无 JSON 无标记、正文保留。
+    """
+    from backend import standalone_events as se
+
+    plugin = _FakePlugin()
+    ev = _Event()
+    ev.set_extra("meme_manager_semantic_search_completed", True)
+    ev.set_extra("meme_manager_semantic_candidates", _sign_candidate_map())
+    ev.set_extra("meme_manager_semantic_default_id", "meme:a2bd8f1b47a4")
+    resp = _Resp(
+        '{"reply":"哼，喏——本小姐亲自盖章：好女孩desuwa~！\\n","sign_text":"好女孩"}'
+        "\n&&meme:a2bd8f1b47a4&&"
+    )
+
+    async def _hook():
+        # 复刻 main.py 100000 钩子的派发顺序(剥离先行)
+        await se.handle_llm_response(plugin, ev, resp)
+        await ie.on_llm_response_first(plugin, ev, resp)
+
+    asyncio.run(_hook())
+    assert "{" not in resp.completion_text, "JSON 协议残留不得发给用户"
+    assert "sign_text" not in resp.completion_text
+    assert "meme:" not in resp.completion_text, "&&meme:&& 标记必须剥除"
+    assert "好女孩desuwa" in resp.completion_text, "正文必须保留"
+    assert plugin.render_calls, "必须触发渲染"
+    assert plugin.render_calls[0][1] == "好女孩", "必须复用模型残留牌面文字(不烧二次 LLM)"
+    assert ev.get_extra(ie.EXTRA_RENDERED_PATH) == "/tmp/fake_sign.png"
+
+
+def test_render_interface_missing_degrades_cleanly():
+    """插件缺渲染接口时: 明确降级纯文字,不抛 AttributeError。"""
+    plugin = _FakePlugin()
+    plugin.render_for_meme_manager = None  # 实例级覆盖,模拟接口缺失(不污染类)
+    ev = _Event()
+    ev.set_extra("meme_manager_semantic_candidates", _sign_candidate_map())
+    ev.set_extra("meme_manager_semantic_default_id", "meme:a2bd8f1b47a4")
+    resp = _Resp("回复\n\n&&meme:a2bd8f1b47a4&&")
+
+    asyncio.run(
+        ie.on_llm_response_first(plugin, ev, resp, llm_generate=_make_llm_response())
+    )
+    assert ev.get_extra(ie.EXTRA_RENDERED_PATH) is None, "缺接口必须降级,不得出现半成品状态"
+
+
 if __name__ == "__main__":
     test_tool_mode_sign_marker_stripped_and_rendered()
     test_tool_mode_normal_meme_untouched()
@@ -253,4 +306,6 @@ if __name__ == "__main__":
     test_decorating_clears_extras_and_appends_rendered_image()
     test_render_failure_no_image_and_clean_text()
     test_cleanup_after_sent()
-    print("integrated events tests PASS (8)")
+    test_incident_20260910_json_leak_and_render_crash()
+    test_render_interface_missing_degrades_cleanly()
+    print("integrated events tests PASS (10)")

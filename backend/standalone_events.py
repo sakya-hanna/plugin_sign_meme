@@ -28,6 +28,10 @@ EXTRA_SIGN_ATTEMPTED = "meme_manager_sign_attempted"
 EXTRA_SIGN_PLUGIN = "meme_manager_sign_plugin"
 EXTRA_SIGN_TEMP_FILE = "meme_manager_sign_temp_file"
 EXTRA_SIGN_REQUEST_ID = "meme_manager_sign_request_id"
+# integrated: 模型从历史样本模仿输出 {"reply","sign_text"} 协议时,残留里的
+# sign_text 存到这里供渲染管线直接复用(省一次二次 LLM)。挂在本插件命名空间,
+# 不写官方旧 key(官方旧链路可能消费导致双发)。
+EXTRA_MODEL_SIGN_TEXT = "sign_meme_integrated_model_sign_text"
 
 SIGN_PROMPT_BODY = (
     "\n\n" + SIGN_PROMPT_MARKER + "\n"
@@ -97,11 +101,15 @@ async def handle_llm_request(plugin, event: AstrMessageEvent, req: ProviderReque
 
 
 async def handle_llm_response(plugin, event: AstrMessageEvent, response) -> None:
-    """独立模式:解析结构化回复,剥离 JSON,记录 sign_text。"""
-    if plugin.sign_mode != "standalone":
-        return
+    """独立模式:解析结构化回复,剥离 JSON,记录 sign_text。
+
+    integrated 模式同样兜底剥离(2026-09-10 22:04 实测回归):旧链路协议
+    可能经对话历史样本被模型模仿输出;渲染管线崩溃或无人剥离时,原始
+    JSON 会原样发给用户。剥离出的 sign_text 写入本插件 extra 供渲染
+    管线复用,不写官方旧 key(防官方旧路径消费导致双发)。
+    """
     if event.get_extra("meme_manager_sign_structured"):
-        return  # meme_manager 旧链路已处理(migration 期共存)
+        return  # 旧链路已处理(migration 期共存)
     text = str(getattr(response, "completion_text", "") or "")
     if SIGN_PROMPT_MARKER not in text and not text.strip().startswith("{"):
         # 无协议痕迹且非 JSON 形态,快速跳过(协议未注入给本轮的概率高)
@@ -112,9 +120,16 @@ async def handle_llm_response(plugin, event: AstrMessageEvent, response) -> None
         return
     visible_reply, sign_text = structured
     response.completion_text = visible_reply
-    event.set_extra(EXTRA_SIGN_TEXT, sign_text)
+    if plugin.sign_mode == "standalone":
+        event.set_extra(EXTRA_SIGN_TEXT, sign_text)
+        logger.info("[sign_meme] standalone 解析结构化回复 sign_text=%s", bool(sign_text))
+    else:
+        event.set_extra(EXTRA_MODEL_SIGN_TEXT, sign_text)
+        logger.info(
+            "[sign_meme] integrated 模式剥离模型模仿的 JSON 协议残留 sign_text=%s",
+            bool(sign_text),
+        )
     event.set_extra("meme_manager_sign_structured", True)
-    logger.info("[sign_meme] standalone 解析结构化回复 sign_text=%s", bool(sign_text))
 
 
 async def handle_decorating_result(plugin, event: AstrMessageEvent) -> None:

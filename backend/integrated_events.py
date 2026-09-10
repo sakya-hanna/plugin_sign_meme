@@ -28,6 +28,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from .semantic_pool import SIGN_CATEGORY
+from .standalone_events import EXTRA_MODEL_SIGN_TEXT
 
 # 本插件自己的 extra key(前缀区分,不与上游冲突)
 EXTRA_RENDERED_PATH = "sign_meme_integrated_rendered_path"
@@ -117,6 +118,22 @@ async def _generate_sign_text(
     if llm_generate is not None:
         response = await llm_generate(plugin, event, prompt, provider_id, model)
     else:
+        if not provider_id:
+            # 兜底: 官方未记录本轮 provider 时用全局默认对话模型。
+            try:
+                provider_id = str(
+                    plugin.context.provider_manager.provider_settings.get(
+                        "default_provider_id", ""
+                    )
+                    or ""
+                ).strip()
+            except Exception:
+                provider_id = ""
+        if not provider_id:
+            logger.warning(
+                "[sign_meme][integrated] 无可用 LLM provider,跳过牌面文字生成"
+            )
+            return ""
         response = await plugin.llm_generate(prompt, provider_id=provider_id, model=model)
     raw = str(getattr(response, "completion_text", "") or "").strip()
     try:
@@ -153,21 +170,36 @@ async def run_render_pipeline(
     if not template_id:
         logger.warning("[sign_meme][integrated] 无激活模板,放弃举牌渲染")
         return False
-    try:
-        sign_text = await _generate_sign_text(plugin, event, llm_generate)
-    except Exception as exc:
-        logger.error(
-            "[sign_meme][integrated] 牌面文字生成失败 error=%s", exc, exc_info=True
-        )
-        return False
+    # 牌面文字来源优先级:
+    # 1) 模型本轮自己输出的 JSON 协议残留(handle_llm_response 兜底剥离所得)
+    # 2) 二次 LLM 生成
+    sign_text = str(event.get_extra(EXTRA_MODEL_SIGN_TEXT) or "").strip()
+    if sign_text:
+        event.set_extra(EXTRA_MODEL_SIGN_TEXT, None)
+        logger.info("[sign_meme][integrated] 复用模型协议残留牌面文字=%s", sign_text)
+    else:
+        try:
+            sign_text = await _generate_sign_text(plugin, event, llm_generate)
+        except Exception as exc:
+            logger.error(
+                "[sign_meme][integrated] 牌面文字生成失败 error=%s", exc, exc_info=True
+            )
+            return False
     if not sign_text:
-        logger.info("[sign_meme][integrated] 二次 LLM 未产出牌面文字,跳过渲染")
+        logger.info("[sign_meme][integrated] 未产出牌面文字,跳过渲染")
         return False
     request_id = uuid.uuid4().hex
     try:
-        result = await plugin.generate_with_template(
-            template_id, sign_text, request_id=request_id
-        )
+        # 真实接口: main.py 上的公开渲染方法(按模板渲染,不依赖激活态)。
+        # getattr 防护: 接口缺失时明确降级为纯文字,不抛 AttributeError。
+        render = getattr(plugin, "render_for_meme_manager", None)
+        if render is None:
+            logger.error(
+                "[sign_meme][integrated] 插件缺少 render_for_meme_manager 接口,"
+                "放弃渲染(降级纯文字)"
+            )
+            return False
+        result = await render(template_id, sign_text, request_id=request_id)
     except Exception as exc:
         logger.error(
             "[sign_meme][integrated] 渲染异常 request_id=%s error=%s",
@@ -278,15 +310,23 @@ async def on_llm_response_second(
 
 
 async def on_decorating_result_first(plugin, event: AstrMessageEvent) -> None:
-    """priority=100000。口子D兜底清空 + 成品图追加进消息链。"""
+    """priority=100000。口子D兜底清空 + 成品图追加进消息链。
+
+    兜底清空仅允许在"本轮确实存在举牌候选渲染"时执行。
+    无条件清空会把官方 on_llm_response(99999) 刚写入的普通表情
+    selected_ids 一并抹掉（ decorating 100000 先于官方 99999 执行），
+    导致普通表情图片永远不被发送（2026-09-10 18:24 实测回归）。
+    """
     if plugin.sign_mode != "integrated":
         return
-    # 兜底清空(防上游 decorating 前的任何残留;普通候选不含举牌,无副作用)
-    event.set_extra(UPSTREAM_SELECTED_IDS, None)
-    event.set_extra(UPSTREAM_DEFAULT_ID, None)
     path = str(event.get_extra(EXTRA_RENDERED_PATH) or "").strip()
     if not path:
+        # 本轮没有举牌渲染: 不得触碰官方 selected_ids/default_id,
+        # 让普通表情链路原样走官方 decorating(99999)。
         return
+    # 有举牌成品图待追加: 此时才兜底清空,防止官方 decorating 再次消费举牌候选。
+    event.set_extra(UPSTREAM_SELECTED_IDS, None)
+    event.set_extra(UPSTREAM_DEFAULT_ID, None)
     event.set_extra(EXTRA_RENDERED_PATH, None)
     try:
         from astrbot.core.message.components import Image

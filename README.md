@@ -195,7 +195,21 @@ web_api 路由在进程启动时注册，改 handler 后插件 reload 无效，�
 7. 空 caption/tags 的模板在拷贝镜像文件**之前**拒绝入池——此类记录过不了
    semantic_caption_is_complete,会连带挡住整个 pack 的检索门禁,且拷贝后
    拒绝会留下无记录的孤儿镜像文件（测试
-   test_upsert_rejects_blank_caption_without_orphan_file）。
+   test_upsert_rejects_blank_caption_without_orphan_file）;
+8. integrated 渲染必须调用 main.py 真实公开接口
+   `render_for_meme_manager(template_id, sign_text, request_id=)`——
+   不要调用 service 层的 generate_with_template 或写不存在的方法名
+   （2026-09-10 22:04 QQ 实测回归: AttributeError 导致本轮无图,且模型
+   模仿历史样本输出的 {"reply","sign_text"} JSON 协议无人剥离,原样发给
+   用户。修复三件套: 方法名+getattr 防护降级 / standalone_events 兜底
+   剥离 JSON 并把 sign_text 写入 sign_meme_integrated_model_sign_text /
+   main.py 100000 钩子内剥离先于拦截管线执行）。回归测试:
+   test_incident_20260910_json_leak_and_render_crash、
+   test_render_interface_missing_degrades_cleanly;
+9. 钩子派发顺序敏感: handle_llm_response(剥离)必须先于
+   on_llm_response_first(拦截渲染)——渲染管线要从剥离产物里读
+   sign_text,顺序颠倒会让复用永远落空（第 8 条修复的一部分,
+   test_main_hooks 的矩阵断言不覆盖顺序,改动时对照 main.py 内注释）。
 
 ## 开发与回归注意事项
 

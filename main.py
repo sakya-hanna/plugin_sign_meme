@@ -75,11 +75,29 @@ class SignMemePlugin(Star):
 
     @property
     def self_managed_sign_events(self) -> bool:
-        """零修改方案下 integrated 不再需要上游让位——返回 False。
+        """integrated 模式下旧链路必须完全让位。
 
-        保留属性仅为兼容;官方原版 meme_manager 无此检查。
+        返回 False 时官方 meme_manager 会继续:
+        1) 注入旧 JSON 协议 prompt(与语义 && 标记协议冲突);
+        2) _parse_sign_meme_response 命中 JSON → 走旧渲染链路发举牌图;
+        3) 语义 referenced_ids 为空 → default fallback 自动选普通表情;
+        结果同轮双图(2026-09-10 19:05 实测回归)。
+        standalone 模式本就自管,同样让位。
         """
-        return False
+        return True
+
+    async def llm_generate(self, prompt: str, *, provider_id: str = "", model: str = ""):
+        """供 integrated 渲染管线调用 AstrBot Context LLM。
+
+        provider_id/model 留空时由 _generate_sign_text 先行解析,
+        此处兜底经 context 指定 chat_provider_id。
+        """
+        kwargs: dict = {"prompt": prompt}
+        if provider_id:
+            kwargs["chat_provider_id"] = provider_id
+        if model:
+            kwargs["model"] = model
+        return await self.context.llm_generate(**kwargs)
 
     def _effective_sign_mode(self) -> str:
         """实际生效模式: integrated 且上游可用才走 integrated,否则降级 standalone。"""
@@ -479,15 +497,19 @@ class SignMemePlugin(Star):
 
     @filter.on_llm_response(priority=100000)
     async def on_llm_response_first_sign(self, event: AstrMessageEvent, response):
-        mode = self._effective_sign_mode()
-        if mode == "integrated":
-            await integrated_events.on_llm_response_first(self, event, response)
+        # 顺序敏感: JSON 协议剥离必须先于 integrated 拦截管线——
+        # 剥离出的 sign_text 会写入 extra 供渲染管线直接复用
+        # (2026-09-10 22:04 回归: 顺序颠倒导致复用永远落空)。
         await standalone_events.handle_llm_response(self, event, response)
+        if self._effective_sign_mode() == "integrated":
+            await integrated_events.on_llm_response_first(self, event, response)
 
     @filter.on_llm_response(priority=99998)
     async def on_llm_response_second_sign(self, event: AstrMessageEvent, response):
         if self._effective_sign_mode() == "integrated":
-            await integrated_events.on_llm_response_second(self, event, response)
+            # 签名是 (plugin, event, llm_generate): response 不是第三个参数
+            # (2026-09-10 修正: 原误传会把 response 当 llm_generate 调用)。
+            await integrated_events.on_llm_response_second(self, event)
 
     @filter.on_decorating_result(priority=100000)
     async def on_decorating_result_first_sign(self, event: AstrMessageEvent):
