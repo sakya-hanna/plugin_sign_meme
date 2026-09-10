@@ -320,19 +320,8 @@ class SemanticPoolSync:
         return {"ok": True, **ops}
 
     # ---- 向量增量(异步,由调用方在事务提交后调度) ----
+    # 实际重建由 main.py:_rebuild_pool_vectors 经 compat 层完成。
 
     async def rebuild_vectors(self, entry_ids: list[str] | None = None) -> dict:
-        """按 entry 增量重建 FAISS;entry_ids=None 时重建整包。"""
-        if not self.available():
-            return {"ok": False, "reason": "meme_manager 不可用"}
-        pack_dir = _default_pack_dir(self.root)
-        try:
-            from astrbot_plugin_meme_manager.backend.semantic_index import (
-                EmbeddingAdapter, build_index,
-            )
-            # embedding provider 由调用方注入(需要 AstrBot context);
-            # 这里不做,向量重建统一走 meme_manager 管理页已有的
-            # "重建"入口/或由 main.py 在运行时触发。此处仅提供纯函数入口。
-            return {"ok": False, "reason": "embedding_provider_required"}
-        except Exception as exc:
-            return {"ok": False, "reason": str(exc)}
+        """占位入口: 请使用 plugin._rebuild_pool_vectors(compat 化路径)。"""
+        return {"ok": False, "reason": "use_main_rebuild_pool_vectors"}
