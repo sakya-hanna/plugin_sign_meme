@@ -229,6 +229,7 @@ class SemanticPoolSync:
         # embedding_status 打回 pending,已建好的 FAISS 向量被标记失效。
         # (向量按文本哈希对齐;语义文本变了才需要真正重嵌。)
         previous = images.get(entry_id)
+        needs_vector = True
         if isinstance(previous, dict) and is_sign_entry(previous):
             normalize_tags = models.normalize_tags
             text_unchanged = (
@@ -246,12 +247,15 @@ class SemanticPoolSync:
                 ):
                     if field in previous:
                         entry[field] = previous[field]
+                # 文本没变:只有向量尚未完成时才需要重建(创建/编辑后由
+                # service 的 pending 队列消费;已完成则跳过,省 API 调用)。
+                needs_vector = str(entry.get("embedding_status") or "") != "done"
         images[entry_id] = entry
         _refresh_pack_totals(storage, pack_dir, metadata)
         storage.save_metadata(pack_dir, metadata)
-        self._log("info", "event=sign_pool_upserted template_id=%s entry_id=%s",
-                  template_id=template["id"], entry_id=entry_id[:12])
-        return {"ok": True, "entry_id": entry_id, "needs_vector": True}
+        self._log("info", "event=sign_pool_upserted template_id=%s entry_id=%s needs_vector=%s",
+                  template_id=template["id"], entry_id=entry_id[:12], needs_vector=needs_vector)
+        return {"ok": True, "entry_id": entry_id, "needs_vector": needs_vector}
 
     def remove(self, template_id: str) -> dict[str, Any]:
         """删除模板的池内记录+文件镜像。"""
