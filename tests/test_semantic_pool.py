@@ -261,6 +261,52 @@ def test_written_record_matches_official_normalization():
         assert SIGN_CATEGORY in vector_text
 
 
+def test_reconcile_repairs_tampered_records():
+    """防回归(零修改方案): 官方语义化任务/手动编辑可能篡改举牌记录
+    (caption 覆盖、context_hash 失配)。启动 reconcile 必须按模板库修复,
+    且修复动作只出现在 updated 列表。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        sync.upsert(_template(), _image(td))
+        # 模拟上游篡改: caption 被改 + category_description 清空
+        meta = sync.storage.load_metadata(pack)
+        eid = next(iter(meta["images"]))
+        meta["images"][eid]["caption"] = "被官方任务覆盖的描述"
+        meta["images"][eid]["category_description"] = ""
+        meta["images"][eid]["manual_override"] = False
+        sync.storage.save_metadata(pack, meta)
+
+        img = _image(td)
+        resolver = lambda t: img
+        r = sync.reconcile("integrated", [_template()], resolver)
+        assert r["ok"]
+        assert "t1" in r["updated"], f"篡改记录必须被修复: {r}"
+
+        meta2 = sync.storage.load_metadata(pack)
+        entry = meta2["images"][eid]
+        assert entry["caption"] == "评价场景", "caption 必须恢复为模板库值"
+        assert entry["category_description"], "description 必须恢复"
+        assert entry["manual_override"] is True, "manual 标记必须恢复"
+
+
+def test_reconcile_no_tamper_is_noop():
+    """未篡改时 reconcile 不应产生多余的 updated 抖动。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        img = _image(td)
+        resolver = lambda t: img
+        sync.reconcile("integrated", [_template()], resolver)
+        r2 = sync.reconcile("integrated", [_template()], resolver)
+        assert r2["ok"] and r2["added"] == [] and r2["removed"] == []
+        # updated 允许出现(幂等 upsert 语义),但记录内容必须稳定
+        meta = sync.storage.load_metadata(pack)
+        assert len(meta["images"]) == 1
+
+
 if __name__ == "__main__":
     test_build_entry_shape()
     test_upsert_and_remove_roundtrip()
@@ -273,4 +319,6 @@ if __name__ == "__main__":
     test_identify_by_category_not_custom_flag()
     test_is_sign_entry_unit()
     test_written_record_matches_official_normalization()
-    print("semantic pool tests PASS (11)")
+    test_reconcile_repairs_tampered_records()
+    test_reconcile_no_tamper_is_noop()
+    print("semantic pool tests PASS (13)")
