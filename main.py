@@ -15,8 +15,9 @@ from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, file_response, json_response, request
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
+from .backend import compat
+from .backend import integrated_events, standalone_events
 from .backend.service import SignMemeError, SignMemeService
-from .backend import standalone_events
 
 PLUGIN_NAME = "sign_meme"
 ALT_PLUGIN_NAME = "astrbot_plugin_sign_meme"
@@ -31,6 +32,8 @@ class SignMemePlugin(Star):
         self.context = context
         self.config = config
         self.service.sign_mode_provider = lambda: self.sign_mode
+        self._compat_upstream_missing = False
+        self._probe_upstream_compat()
         self._register_routes()
         self.logger.info(
             "event=plugin_initialized data_dir=%s sign_mode=%s",
@@ -72,8 +75,43 @@ class SignMemePlugin(Star):
 
     @property
     def self_managed_sign_events(self) -> bool:
-        """能力标志:meme_manager 旧链路据此让位(避免双注入/双发图)。"""
-        return True
+        """零修改方案下 integrated 不再需要上游让位——返回 False。
+
+        保留属性仅为兼容;官方原版 meme_manager 无此检查。
+        """
+        return False
+
+    def _effective_sign_mode(self) -> str:
+        """实际生效模式: integrated 且上游可用才走 integrated,否则降级 standalone。"""
+        mode = self.sign_mode
+        if mode == "integrated" and getattr(self, "_compat_upstream_missing", False):
+            return "standalone"
+        return mode
+
+    def _probe_upstream_compat(self) -> None:
+        """启动时探测官方 meme_manager(零修改对接的前提)。"""
+        self._compat_upstream_missing = False
+        self._compat_upstream_version = ""
+        try:
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            info = compat.probe_upstream(
+                Path(get_astrbot_data_path()) / "plugins", data_root
+            )
+            if info is None:
+                self._compat_upstream_missing = True
+                self.logger.warning(
+                    "event=compat_upstream_missing mode=integrated 将降级 standalone"
+                )
+                return
+            self._compat_upstream_version = info.version
+            self.logger.info(
+                "event=compat_upstream_detected version=%s pack=%s",
+                info.version or "unknown",
+                info.default_pack_dir.name if info.default_pack_dir else "none",
+            )
+        except Exception as exc:
+            self._compat_upstream_missing = True
+            self.logger.warning("event=compat_probe_failed error=%s", exc)
 
     async def _rebuild_pool_vectors(self, entry_ids: list[str] | None = None) -> dict:
         """对接模式:按 entry 增量重建主 pack FAISS 索引(需要 embedding provider)。"""
@@ -411,22 +449,42 @@ class SignMemePlugin(Star):
         """返回与 meme_manager 语义图片记录兼容的当前模板快照。"""
         return self.service.active_semantic_context()
 
-    # ---- 独立模式事件链路(standalone 模式激活) ----
+    # ---- 事件链路(分模式派发;priority 矩阵见 backend/integrated_events.py) ----
+    # standalone: 独立协议注入/渲染,不依赖上游
+    # integrated: 前置拦截管线,零修改对接官方 meme_manager
+    #             (response 100000 拦截 → 官方 99999 → response 99998
+    #              移除 selected → decorating 100000 兜底清空+追加成品图)
 
     @filter.on_llm_request()
     async def on_llm_request_sign(self, event: AstrMessageEvent, req: ProviderRequest):
-        await standalone_events.handle_llm_request(self, event, req)
+        if self._effective_sign_mode() == "standalone":
+            await standalone_events.handle_llm_request(self, event, req)
+        elif hasattr(self, "_compat_upstream_missing") and self._compat_upstream_missing:
+            await standalone_events.handle_llm_request(self, event, req)
 
-    @filter.on_llm_response()
-    async def on_llm_response_sign(self, event: AstrMessageEvent, response):
+    @filter.on_llm_response(priority=100000)
+    async def on_llm_response_first_sign(self, event: AstrMessageEvent, response):
+        mode = self._effective_sign_mode()
+        if mode == "integrated":
+            await integrated_events.on_llm_response_first(self, event, response)
         await standalone_events.handle_llm_response(self, event, response)
 
-    @filter.on_decorating_result()
-    async def on_decorating_result_sign(self, event: AstrMessageEvent):
+    @filter.on_llm_response(priority=99998)
+    async def on_llm_response_second_sign(self, event: AstrMessageEvent, response):
+        if self._effective_sign_mode() == "integrated":
+            await integrated_events.on_llm_response_second(self, event, response)
+
+    @filter.on_decorating_result(priority=100000)
+    async def on_decorating_result_first_sign(self, event: AstrMessageEvent):
+        mode = self._effective_sign_mode()
+        if mode == "integrated":
+            await integrated_events.on_decorating_result_first(self, event)
         await standalone_events.handle_decorating_result(self, event)
 
     @filter.after_message_sent()
     async def after_message_sent_sign(self, event: AstrMessageEvent):
+        if self._effective_sign_mode() == "integrated":
+            await integrated_events.after_message_sent(self, event)
         await standalone_events.handle_after_message_sent(self, event)
 
     async def cleanup_generated(self, path: str) -> bool:
