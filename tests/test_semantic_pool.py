@@ -229,6 +229,38 @@ def test_is_sign_entry_unit():
     assert not is_sign_entry(None)
 
 
+def test_written_record_matches_official_normalization():
+    """写入记录必须经得起官方 SemanticImage 白名单往返,且自带非空
+    category_description(避免官方占位文本"请添加描述"稀释向量),
+    manual_override/provenance 标记齐全(官方语义化任务跳过依据)。"""
+    with TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        root, pack = _make_env(td)
+        sync = SemanticPoolSync(root=root)
+        r = sync.upsert(_template(), _image(td))
+        assert r["ok"]
+        api = sync.storage, sync.models
+        assert all(api), "容器/宿主环境必须有上游模块"
+        from astrbot_plugin_meme_manager.backend.semantic_models import SemanticImage
+
+        meta = sync.storage.load_metadata(pack)
+        eid, entry = next(iter(meta["images"].items()))
+        # 1) 白名单往返: 官方规范化后核心字段存活
+        round_trip = SemanticImage.from_dict(entry).to_dict()
+        assert round_trip["category"] == SIGN_CATEGORY
+        assert round_trip["relative_path"].startswith(f"memes/{SIGN_CATEGORY}/")
+        # 2) 描述策略: category_description 必非空(占位符会进向量文本)
+        assert str(entry.get("category_description") or "").strip()
+        assert "请添加描述" not in str(entry.get("category_description"))
+        # 3) manual 标记: 官方语义化任务按此跳过人工记录
+        assert entry.get("manual_override") is True
+        assert entry.get("provenance") in ("manual", "mixed", "sign_meme")
+        # 4) 向量文本组成(官方 vector_text 模板)不含占位符
+        vector_text = SemanticImage.from_dict(entry).vector_text
+        assert "请添加描述" not in vector_text
+        assert SIGN_CATEGORY in vector_text
+
+
 if __name__ == "__main__":
     test_build_entry_shape()
     test_upsert_and_remove_roundtrip()
@@ -240,4 +272,5 @@ if __name__ == "__main__":
     test_upsert_preserves_done_embedding_on_unchanged_text()
     test_identify_by_category_not_custom_flag()
     test_is_sign_entry_unit()
-    print("semantic pool tests PASS (10)")
+    test_written_record_matches_official_normalization()
+    print("semantic pool tests PASS (11)")

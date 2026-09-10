@@ -116,32 +116,27 @@ class SignMemePlugin(Star):
     async def _rebuild_pool_vectors(self, entry_ids: list[str] | None = None) -> dict:
         """对接模式:按 entry 增量重建主 pack FAISS 索引(需要 embedding provider)。"""
         try:
-            import sys
-            plugins_root = str(Path(get_astrbot_data_path()) / "plugins")
-            if plugins_root not in sys.path:
-                sys.path.insert(0, plugins_root)
-            from astrbot_plugin_meme_manager.backend.semantic_index import (
-                EmbeddingAdapter, build_index,
-            )
-            from astrbot_plugin_meme_manager.backend import semantic_storage
-            from astrbot_plugin_meme_manager.backend.pack_resolver import resolve_pack_id
-            pack_id = resolve_pack_id()
+            api = compat.public_api()
+            if api is None:
+                return {"ok": False, "reason": "upstream_unavailable"}
+            _, _, semantic_index = api
+            build_index = semantic_index.build_index
+            pack_id = self._compat_default_pack_id()
             if not pack_id:
                 return {"ok": False, "reason": "no_default_pack"}
-            pack_dir = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager" / "packs" / pack_id
-            provider = None
-            try:
-                provider = self.context.get_using_provider()
-            except Exception:
-                pass
-            if provider is None:
-                return {"ok": False, "reason": "no_embedding_provider"}
-            embedding = EmbeddingAdapter(provider)
-            if not embedding.ready:
-                return {"ok": False, "reason": "embedding_not_ready"}
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            pack_dir = data_root / "packs" / pack_id
+            resolved = compat.resolve_embedding_provider_for_pack(
+                self.context, pack_dir, data_root
+            )
+            if resolved is None:
+                # 与索引 manifest 不一致或 provider 不可用:宁可不重建,
+                # 也不能用错模型写坏向量(search_index 会静默拒绝)
+                return {"ok": False, "reason": "embedding_provider_mismatch"}
+            provider, embedding = resolved
             result = await build_index(
                 pack_dir,
-                Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager",
+                data_root,
                 pack_id,
                 embedding,
                 target_entry_ids=set(entry_ids) if entry_ids else None,
@@ -150,6 +145,19 @@ class SignMemePlugin(Star):
         except Exception as exc:
             self.logger.error("event=sign_pool_vector_rebuild_failed error=%s", type(exc).__name__)
             return {"ok": False, "reason": str(exc)}
+
+    def _compat_default_pack_id(self) -> str:
+        """默认 pack id(经 compat 探测;失败回退 selection_rules 解析)。"""
+        try:
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            info = compat.probe_upstream(
+                Path(get_astrbot_data_path()) / "plugins", data_root
+            )
+            if info and info.default_pack_dir:
+                return info.default_pack_dir.name
+        except Exception:
+            pass
+        return ""
 
     async def _after_mode_switch(self) -> None:
         """模式切换后:reconcile 语义池 + 触发向量增量。"""

@@ -61,33 +61,17 @@ def _plugin_data_root() -> Path:
 
 
 def _mm_imports():
-    """延迟导入 meme_manager 后端,插件未安装时返回 None。
+    """经 compat 层导入上游公开模块(零修改对接的统一入口)。
 
-    两条路径: AstrBot 运行时(astrbot 包可导入) → 标准插件目录;
-    纯 pytest 环境 → 沿 plugin_data 上溯找 plugins/astrbot_plugin_meme_manager。
+    兼容旧调用方: 返回 (storage, models) 二元组;不可用时均为 None。
     """
-    import sys
-    candidates = []
-    try:
-        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-        candidates.append(Path(get_astrbot_data_path()) / "plugins")
-    except Exception:
-        pass
-    here = Path(__file__).resolve().parent.parent
-    # sign_meme 位于 plugins/astrbot_plugin_sign_meme/backend/ → plugins 根是 parent.parent
-    candidates.append(here.parent)
-    for plugins_root in candidates:
-        if (plugins_root / "astrbot_plugin_meme_manager" / "backend" / "semantic_storage.py").is_file():
-            s = str(plugins_root)
-            if s not in sys.path:
-                sys.path.insert(0, s)
-            break
-    try:
-        from astrbot_plugin_meme_manager.backend import semantic_storage
-        from astrbot_plugin_meme_manager.backend import semantic_models
-        return semantic_storage, semantic_models
-    except Exception:
+    from . import compat
+
+    api = compat.public_api()
+    if api is None:
         return None, None
+    storage, models, _ = api
+    return storage, models
 
 
 def _default_pack_dir(root: Path) -> Path | None:
@@ -182,7 +166,7 @@ def build_sign_entry(
         "manual_visible_text": "",
         "category_review_status": "manual_confirmed",
         "category_description": "举牌模板(生成型表情包:命中后渲染文字再发送)",
-        "provenance": "sign_meme",
+        "provenance": "manual",
         "updated_at": template.get("source_updated_at") or "",
         SIGN_FLAG: True,
         SIGN_ID_FIELD: str(template.get("id") or ""),
