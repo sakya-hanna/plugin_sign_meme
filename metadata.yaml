@@ -1,0 +1,21 @@
+name: sign_meme
+display_name: 举牌表情包
+short_desc: 独立举牌模板管理与文字透视生成能力
+desc: >-
+  为 AstrBot 提供可配置举牌模板、矩形牌面文字渲染、临时生成与收藏能力。
+  第一版由 meme_manager 调用，不提供独立聊天指令。
+version: 0.1.0
+author: local
+repo: https://github.com/sakya-hanna/plugin_sign_meme
+astrbot_version: ">=4.17.0"
+support_platforms:
+  - aiocqhttp
+tags:
+  - 表情包
+  - 举牌
+  - WebUI
+  - 图片生成
+pages:
+  - name: 举牌模板
+    route: index
+    description: 管理举牌模板和牌面区域

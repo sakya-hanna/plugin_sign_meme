@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# 运行时数据: 模板数据库、生成图、镜像目录、日志
+# (模板底图与生成图属个人素材;数据目录含运行时状态)
+data/
+
+# 第三方大文件: 字体(用户自行下载放置,见 README)
+fonts/
+
+# 系统/编辑器
+.DS_Store
+*.swp
+.idea/
+.vscode/

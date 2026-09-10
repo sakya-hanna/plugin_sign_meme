@@ -1,0 +1,22 @@
+{
+  "sign_mode": {
+    "description": "运行模式",
+    "type": "string",
+    "default": "standalone",
+    "options": ["standalone", "integrated"],
+    "hint": "standalone=独立使用：本插件自己的命中链路（协议注入+激活模板渲染），不依赖表情包管理器；integrated=对接模式：举牌模板进入表情包管理器的语义检索池，命中后二次生成牌面文字并渲染发送"
+  },
+  "sign_text_llm_provider": {
+    "description": "对接模式：牌面文字模型 Provider",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "检索命中举牌模板后生成牌面文字所用的模型；留空时自动复用当前会话正在使用的回复模型"
+  },
+  "sign_text_llm_model": {
+    "description": "对接模式：牌面文字模型名称覆盖",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用所选 Provider 的默认模型；仅在 Provider 支持多模型且需要覆盖时填写"
+  }
+}

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>举牌模板</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 24px; background: #f6f7fb; color: #20232a; }
+    main { max-width: 1100px; margin: auto; }
+    .panel { background: #fff; border: 1px solid #e3e6ee; border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 4px 18px #20232a0a; }
+    h1 { margin: 0 0 8px; } h2 { margin-top: 0; font-size: 18px; }
+    .hint { color: #687083; font-size: 13px; }
+    label { display: block; margin: 12px 0 6px; font-weight: 600; }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #ccd2df; border-radius: 8px; padding: 9px; }
+    textarea { min-height: 70px; resize: vertical; }
+    button { border: 0; border-radius: 8px; background: #315efb; color: white; padding: 9px 14px; cursor: pointer; }
+    button.secondary { background: #edf1fb; color: #3152ba; } button.danger { background: #c83d4d; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 18px; }
+    #canvas { max-width: 100%; border: 1px dashed #8390a8; background: #fafbff; cursor: crosshair; touch-action: none; }
+    .points { font-family: ui-monospace, monospace; color: #47546c; font-size: 12px; white-space: pre-wrap; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .status { min-height: 22px; margin-top: 10px; color: #3152ba; } .error { color: #c83d4d; }
+    .template { display: grid; grid-template-columns: 100px 1fr auto; gap: 14px; align-items: center; border-top: 1px solid #edf0f5; padding: 14px 0; }
+    .template img { width: 100px; height: 80px; object-fit: contain; background: #f4f5f8; border-radius: 8px; }
+    .template h3 { margin: 0 0 5px; font-size: 16px; } .template p { margin: 3px 0; color: #687083; font-size: 13px; }
+    .active { color: #18804b !important; font-weight: 700; }
+    @media (max-width: 720px) { body { padding: 12px; } .grid { grid-template-columns: 1fr; } .template { grid-template-columns: 72px 1fr; } .template img { width: 72px; height: 64px; } .template .actions { grid-column: 1 / -1; } }
+  </style>
+</head>
+<body>
+<main>
+  <section class="panel">
+    <h1>举牌模板</h1>
+    <div class="hint">上传图片后默认生成居中的长方形牌面，可直接调节牌面位置、宽度和高度。</div>
+    <div id="mode-bar" style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <strong>运行模式：</strong><span id="mode-current" style="color:#2f7d5c;">读取中…</span>
+      <button id="mode-reconcile" class="secondary" type="button" title="按当前配置重新对齐语义池（进池/出池），不改变配置">同步语义池</button>
+      <span class="hint" id="mode-desc"></span>
+    </div>
+  </section>
+  <section class="panel grid">
+    <div>
+      <h2>创建模板</h2>
+      <label for="name">模板名称</label><input id="name" maxlength="80" placeholder="例如：汉娜举牌" />
+      <label for="description">管理备注</label><textarea id="description" maxlength="500" placeholder="模板管理备注"></textarea>
+      <label for="caption">图片含义（caption）</label><textarea id="caption" maxlength="1000" placeholder="描述这个模板适合表达的情绪、语气、动作或聊天场景"></textarea>
+      <label for="tags">图片标签（多个标签用逗号分隔）</label><input id="tags" maxlength="1000" placeholder="例如：开心，鼓励，调皮，吐槽" />
+      <label for="file">模板图片</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp" />
+      <div class="toolbar"><button id="reset" class="secondary" type="button">重置标记</button><button id="save" type="button">保存模板</button></div>
+      <div id="status" class="status" role="status"></div>
+    </div>
+    <div>
+      <h2>牌面矩形</h2>
+      <canvas id="canvas" width="640" height="480"></canvas>
+      <div class="points">
+        <div>拖动矩形内部可移动牌面，拖动四个角点可调整宽度和高度。</div>
+        <div id="rect-summary">尚未选择图片</div>
+        <input id="rect-x" type="hidden" />
+        <input id="rect-y" type="hidden" />
+        <input id="rect-width" type="hidden" />
+        <input id="rect-height" type="hidden" />
+      </div>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>已创建模板</h2>
+    <div id="list" class="hint">正在读取…</div>
+  </section>
+</main>
+<script src="/api/plugin/page/bridge-sdk.js"></script>
+<script>
+(() => {
+  const bridge = window.AstrBotPluginPage;
+  if (!bridge) {
+    const statusEl = document.querySelector('#status');
+    statusEl.textContent = '页面通信组件未加载；请重新打开此页面后再试。';
+    statusEl.className = 'status error';
+    console.error('[sign_meme] plugin_page_bridge_unavailable');
+    return;
+  }
+  const api = async (path, options = {}) => { await bridge.ready(); const endpoint=path.replace(/^\//,''); const method=(options.method||'GET').toUpperCase(); if(method==='GET') return bridge.apiGet(endpoint, options.params||{}); if(method==='DELETE') return bridge.apiPost(endpoint.replace(/\/?$/,'')+'/delete', options.body||{}); return bridge.apiPost(endpoint, options.body||{}); };
+  async function uploadFile(file) {
+    await bridge.ready();
+    const raw = await bridge.upload('upload', file);
+    return raw?.data || raw?.result || raw;
+  }
+  const fileInput = document.querySelector('#file'), canvas = document.querySelector('#canvas'), ctx = canvas.getContext('2d');
+  const pointsEl = document.querySelector('#rect-summary'), statusEl = document.querySelector('#status');
+  let image = null, points = [];
+  function status(text, error = false) { statusEl.textContent = text; statusEl.className = `status${error ? ' error' : ''}`; }
+  function getRect(){ return {x:Number(document.querySelector('#rect-x').value||0),y:Number(document.querySelector('#rect-y').value||0),width:Number(document.querySelector('#rect-width').value||0),height:Number(document.querySelector('#rect-height').value||0)}; }
+  function setRect(rect){ ['x','y','width','height'].forEach(k=>document.querySelector(`#rect-${k}`).value=Math.round(rect[k]||0)); }
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (image) { const scale = Math.min(canvas.width / image.width, canvas.height / image.height); const w = image.width * scale, h = image.height * scale; ctx.drawImage(image, (canvas.width-w)/2, (canvas.height-h)/2, w, h); canvas.dataset.scale = scale; canvas.dataset.offsetX = (canvas.width-w)/2; canvas.dataset.offsetY = (canvas.height-h)/2; }
+    if(image){ const rect=getRect(), scale=Number(canvas.dataset.scale||1), ox=Number(canvas.dataset.offsetX||0), oy=Number(canvas.dataset.offsetY||0); const left=ox+rect.x*scale, top=oy+rect.y*scale, right=left+rect.width*scale, bottom=top+rect.height*scale; ctx.strokeStyle='#e43d5b';ctx.lineWidth=3;ctx.strokeRect(left,top,right-left,bottom-top); ctx.fillStyle='#e43d5b'; [[left,top],[right,top],[left,bottom],[right,bottom]].forEach(([x,y])=>ctx.fillRect(x-6,y-6,12,12)); }
+    pointsEl.textContent = image ? `矩形：x=${getRect().x}, y=${getRect().y}, ${getRect().width}×${getRect().height}` : '尚未选择图片';
+  }
+  fileInput.addEventListener('change', () => { const f = fileInput.files[0]; if (!f) return; const url = URL.createObjectURL(f); image = new Image(); image.onload = () => { setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4}); draw(); URL.revokeObjectURL(url); }; image.src = url; });
+  let dragMode = null, dragStart = null, dragRect = null;
+  function canvasPoint(e){ const bounds=canvas.getBoundingClientRect(); const scaleX=canvas.width/Math.max(1,bounds.width); const scaleY=canvas.height/Math.max(1,bounds.height); return {x:(e.clientX-bounds.left)*scaleX,y:(e.clientY-bounds.top)*scaleY}; }
+  function sourcePoint(e){ const p=canvasPoint(e), scale=Number(canvas.dataset.scale||1), ox=Number(canvas.dataset.offsetX||0), oy=Number(canvas.dataset.offsetY||0); return {x:(p.x-ox)/scale,y:(p.y-oy)/scale}; }
+  function hitHandle(p, rect){ const hit=24; const hs=[['nw',rect.x,rect.y],['ne',rect.x+rect.width,rect.y],['sw',rect.x,rect.y+rect.height],['se',rect.x+rect.width,rect.y+rect.height]]; const corner=hs.find(([,x,y])=>Math.abs(p.x-x)<=hit&&Math.abs(p.y-y)<=hit)?.[0]; if(corner)return corner; if(Math.abs(p.x-rect.x)<=hit&&p.y>=rect.y&&p.y<=rect.y+rect.height)return 'w'; if(Math.abs(p.x-(rect.x+rect.width))<=hit&&p.y>=rect.y&&p.y<=rect.y+rect.height)return 'e'; if(Math.abs(p.y-rect.y)<=hit&&p.x>=rect.x&&p.x<=rect.x+rect.width)return 'n'; if(Math.abs(p.y-(rect.y+rect.height))<=hit&&p.x>=rect.x&&p.x<=rect.x+rect.width)return 's'; return null; }
+  function updateCursor(e){ if(!image){canvas.style.cursor='default';return;} const h=hitHandle(sourcePoint(e),getRect()); canvas.style.cursor=h&&h.length===2?(h==='nw'||h==='se'?'nwse-resize':'nesw-resize'):h?(h==='n'||h==='s'?'ns-resize':'ew-resize'):'move'; }
+  canvas.addEventListener('pointerdown', e=>{ if(!image)return; const p=sourcePoint(e), rect=getRect(), handle=hitHandle(p,rect); if(handle){dragMode=handle;} else if(p.x>=rect.x&&p.x<=rect.x+rect.width&&p.y>=rect.y&&p.y<=rect.y+rect.height){dragMode='move';} else return; dragStart=p; dragRect={...rect}; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e=>{ if(!dragMode)updateCursor(e); });
+  canvas.addEventListener('pointermove', e=>{ if(!dragMode||!image)return; const p=sourcePoint(e), dx=p.x-dragStart.x, dy=p.y-dragStart.y, r={...dragRect}; if(dragMode==='move'){r.x=dragRect.x+dx;r.y=dragRect.y+dy;} else { if(dragMode.includes('w')){r.x=dragRect.x+dx;r.width=dragRect.width-dx;} if(dragMode.includes('e'))r.width=dragRect.width+dx; if(dragMode.includes('n')){r.y=dragRect.y+dy;r.height=dragRect.height-dy;} if(dragMode.includes('s'))r.height=dragRect.height+dy; } r.width=Math.max(16,r.width);r.height=Math.max(16,r.height);r.x=Math.max(0,Math.min(image.width-r.width,r.x));r.y=Math.max(0,Math.min(image.height-r.height,r.y));setRect(r);draw(); });
+  canvas.addEventListener('pointerup', e=>{dragMode=null;dragStart=null;dragRect=null;try{canvas.releasePointerCapture(e.pointerId);}catch(_){}});
+  canvas.addEventListener('pointercancel', ()=>{dragMode=null;dragStart=null;dragRect=null;});
+  document.querySelector('#reset').onclick = () => { if(image)setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4}); draw(); };
+  document.querySelector('#save').onclick = async () => { const f=fileInput.files[0]; if(!f) return status('请先选择图片', true); const rect=getRect(); if(rect.width<16||rect.height<16) return status('牌面宽度和高度不能小于16像素', true); status('正在上传…'); try { const uploaded=await uploadFile(f); const uploadData=uploaded?.data||uploaded?.result||uploaded; const uploadToken=uploadData?.token; if(!uploadToken) { console.error('[sign_meme] upload_response_missing_token', {keys:Object.keys(uploadData||{}), request_id:uploadData?.request_id}); throw new Error(uploadData?.message||'上传接口未返回令牌'); } console.info('[sign_meme] upload_succeeded', {request_id:uploadData?.request_id, filename:f.name, bytes:f.size}); const d0=await api('/templates',{method:'POST',body:{upload_token:uploadToken,name:document.querySelector('#name').value,description:document.querySelector('#description').value,caption:document.querySelector('#caption').value,tags:document.querySelector('#tags').value,rect}}); const d=d0?.data||d0?.result||d0; if(!d?.template) throw new Error(d?.message||'保存失败'); console.info('[sign_meme] template_create_succeeded', {request_id:d?.request_id, template_id:d.template?.id}); status('保存成功'); fileInput.value=''; image=null; draw(); await load(); } catch(e) { status(e.message||'保存失败', true); } };
+  async function loadPreview(template) {
+    const image = document.querySelector(`[data-preview-id="${template.id}"]`);
+    if (!image) return;
+    try {
+      const raw = await api(`/image/${template.id}/preview`);
+      const data = raw?.data || raw?.result || raw;
+      if (!data?.data_url) throw new Error('预览接口未返回图片');
+      image.src = data.data_url;
+      console.info('[sign_meme] preview_succeeded', {request_id:data.request_id, template_id:template.id});
+    } catch (error) {
+      image.alt = '预览加载失败';
+      console.error('[sign_meme] preview_failed', {template_id:template.id, error:error?.message||String(error)});
+    }
+  }
+  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); if(!d.templates.length){box.textContent='暂无模板';return;} box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){box.textContent=e.message;box.className='hint error';} }
+  async function mutate(path, options){try{await api(path,{method:options.method||'POST',body:options.body||{}});await load();}catch(e){status(e.message||'操作失败',true);}}
+  function confirmDelete(message){return new Promise(resolve=>{const wrap=document.createElement('div');wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:10';wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;max-width:360px;box-shadow:0 10px 40px #0003"><p>${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button data-cancel class="secondary">取消</button><button data-ok class="danger">确认删除</button></div></div>`;document.body.append(wrap);const finish=value=>{wrap.remove();resolve(value)};wrap.querySelector('[data-cancel]').onclick=()=>finish(false);wrap.querySelector('[data-ok]').onclick=()=>finish(true);});}
+  function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  draw(); load();
+  (async function modeBar(){
+    const cur=document.querySelector('#mode-current'), desc=document.querySelector('#mode-desc');
+    const render=(m)=>{
+      cur.textContent = m==='integrated' ? '对接表情包检索' : '独立使用';
+      desc.textContent = m==='integrated'
+        ? '模板已进入表情包语义检索池：命中后由独立模型生成牌面文字再渲染发送。切换请到 AstrBot 插件配置。'
+        : '本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。切换请到 AstrBot 插件配置。';
+    };
+    try{ const raw=await api('/mode'); const d=raw?.data||raw||{}; render(d.sign_mode); }catch(e){ cur.textContent='读取失败'; }
+    const btn=document.querySelector('#mode-reconcile');
+    if(btn) btn.onclick=async()=>{
+      btn.disabled=true; desc.textContent='正在同步…';
+      try{ const raw=await api('/mode/reconcile',{method:'POST',body:{}}); const d=raw?.data||raw||{};
+        desc.textContent='已同步：'+JSON.stringify(d.reconcile||d);
+        try{ const m=await api('/mode'); render((m?.data||m||{}).sign_mode); }catch(_){}
+      }catch(e){ desc.textContent=e.message||'同步失败'; }
+      btn.disabled=false;
+    };
+  })();
+})();
+</script>
+</body>
+</html>
