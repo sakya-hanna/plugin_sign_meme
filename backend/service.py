@@ -7,6 +7,7 @@ import math
 import os
 import secrets
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -51,6 +52,10 @@ class SignMemeService:
         self.semantic_pool = SemanticPoolSync(self.data_dir.parent / "meme_manager", logger=None)
         self.sign_mode_provider = None  # main.py 注入: 返回当前 sign_mode 的 callable
         self.logger = logger_ or logging.getLogger("sign_meme")
+        # 语义池向量待重建队列: upsert 返回 needs_vector 时登记 entry_id,
+        # 由 main.py 异步消费(增量重建 FAISS)。模板语义改动立即生效的关键。
+        self._pending_vector_ids: list[str] = []
+        self._pending_vector_lock = threading.Lock()
         for path in (self.template_dir, self.permanent_dir, self.temp_dir, self.staging_dir):
             path.mkdir(parents=True, exist_ok=True)
         self._migrate()
@@ -483,14 +488,29 @@ class SignMemeService:
         try:
             result = self.semantic_pool.upsert(item, self._resolve_path(str(item["relative_path"])))
             if result.get("ok"):
+                entry_id = str(result.get("entry_id") or "")
+                if result.get("needs_vector") and entry_id:
+                    self._queue_vector_rebuild(entry_id)
                 self.logger.info(
                     "event=sign_pool_synced template_id=%s entry_id=%s needs_vector=%s",
-                    item.get("id"), str(result.get("entry_id"))[:12], bool(result.get("needs_vector")),
+                    item.get("id"), entry_id[:12], bool(result.get("needs_vector")),
                 )
             else:
                 self.logger.warning("event=sign_pool_sync_skipped template_id=%s reason=%s", item.get("id"), result.get("reason"))
         except Exception as exc:
             self.logger.error("event=sign_pool_sync_failed template_id=%s error=%s", item.get("id"), type(exc).__name__, exc_info=True)
+
+    def _queue_vector_rebuild(self, entry_id: str) -> None:
+        """登记待重建向量的 entry(去重,保持插入序;供 main.py 异步消费)。"""
+        with self._pending_vector_lock:
+            if entry_id not in self._pending_vector_ids:
+                self._pending_vector_ids.append(entry_id)
+
+    def drain_pending_vector_ids(self) -> list[str]:
+        """原子取出全部待重建 entry_id(空队列返回 [],不触发任何 IO)。"""
+        with self._pending_vector_lock:
+            pending, self._pending_vector_ids = self._pending_vector_ids, []
+            return pending
 
     def _pool_remove_template(self, template_id: str) -> None:
         if self._sign_mode() != "integrated":

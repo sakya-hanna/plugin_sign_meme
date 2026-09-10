@@ -209,7 +209,18 @@ web_api 路由在进程启动时注册，改 handler 后插件 reload 无效，�
 9. 钩子派发顺序敏感: handle_llm_response(剥离)必须先于
    on_llm_response_first(拦截渲染)——渲染管线要从剥离产物里读
    sign_text,顺序颠倒会让复用永远落空（第 8 条修复的一部分,
-   test_main_hooks 的矩阵断言不覆盖顺序,改动时对照 main.py 内注释）。
+   test_main_hooks 的矩阵断言不覆盖顺序,改动时对照 main.py 内注释）;
+10. 模板语义编辑链路(2026-09-10): PUT /templates/<id> →
+   service.update_template(镜像同步+语义池 upsert) →
+   main._schedule_pool_vector_flush 异步消费 pending 队列增量重建
+   FAISS。upsert 的 needs_vector 语义: caption/tags 变了或向量未完成
+   →True;文本未变且向量 done→False(幂等,省 embedding API)。
+   向量重建必须异步(create_task+集合持引用),不能在请求线程内同步做
+   (大索引重建会卡住 HTTP 响应);
+11. 编辑语义实机验收结论(2026-09-10 23:21): 编辑→pending→done 约
+   0.4-0.6s;新语义检索 top1 立即命中;相同文本重复编辑不触发重建。
+   检索返回的候选 id 是 "meme:"+entry_id[:12] 前缀,与 metadata 全长
+   entry_id 比较时必须截断(验收脚本踩坑)。
 
 ## 开发与回归注意事项
 

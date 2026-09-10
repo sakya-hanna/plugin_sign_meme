@@ -90,6 +90,7 @@
   const fileInput = document.querySelector('#file'), canvas = document.querySelector('#canvas'), ctx = canvas.getContext('2d');
   const pointsEl = document.querySelector('#rect-summary'), statusEl = document.querySelector('#status');
   let image = null, points = [];
+  let templatesCache = [];
   function status(text, error = false) { statusEl.textContent = text; statusEl.className = `status${error ? ' error' : ''}`; }
   function getRect(){ return {x:Number(document.querySelector('#rect-x').value||0),y:Number(document.querySelector('#rect-y').value||0),width:Number(document.querySelector('#rect-width').value||0),height:Number(document.querySelector('#rect-height').value||0)}; }
   function setRect(rect){ ['x','y','width','height'].forEach(k=>document.querySelector(`#rect-${k}`).value=Math.round(rect[k]||0)); }
@@ -126,10 +127,47 @@
       console.error('[sign_meme] preview_failed', {template_id:template.id, error:error?.message||String(error)});
     }
   }
-  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); if(!d.templates.length){box.textContent='暂无模板';return;} box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){box.textContent=e.message;box.className='hint error';} }
+  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); if(!d.templates.length){templatesCache=[];box.textContent='暂无模板';return;} templatesCache=d.templates; box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-edit="${t.id}" class="secondary">编辑语义</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditDialog(b.dataset.edit)); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){box.textContent=e.message;box.className='hint error';} }
   async function mutate(path, options){try{await api(path,{method:options.method||'POST',body:options.body||{}});await load();}catch(e){status(e.message||'操作失败',true);}}
   function confirmDelete(message){return new Promise(resolve=>{const wrap=document.createElement('div');wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:10';wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;max-width:360px;box-shadow:0 10px 40px #0003"><p>${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button data-cancel class="secondary">取消</button><button data-ok class="danger">确认删除</button></div></div>`;document.body.append(wrap);const finish=value=>{wrap.remove();resolve(value)};wrap.querySelector('[data-cancel]').onclick=()=>finish(false);wrap.querySelector('[data-ok]').onclick=()=>finish(true);});}
   function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function openEditDialog(templateId){
+    const t = templatesCache.find(x=>x.id===templateId);
+    if(!t) return status('模板数据未加载，请刷新页面', true);
+    const wrap=document.createElement('div');
+    wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:10';
+    wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;width:min(480px,92vw);box-shadow:0 10px 40px #0003">
+      <h3 style="margin:0 0 4px">编辑语义 — ${escapeHtml(t.name)}</h3>
+      <p class="hint" style="margin:0 0 8px">保存后自动同步语义池并增量重建向量，检索即可用上新语义。</p>
+      <label for="edit-caption">图片含义（caption）</label>
+      <textarea id="edit-caption" maxlength="1000" placeholder="描述这个模板适合表达的情绪、语气、动作或聊天场景">${escapeHtml(t.caption||'')}</textarea>
+      <label for="edit-tags">图片标签（多个标签用逗号分隔）</label>
+      <input id="edit-tags" maxlength="1000" value="${escapeHtml((t.tags||[]).join('，'))}" placeholder="例如：开心，鼓励，调皮，吐槽" />
+      <label for="edit-name">模板名称</label>
+      <input id="edit-name" maxlength="80" value="${escapeHtml(t.name||'')}" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button data-cancel class="secondary" type="button">取消</button>
+        <button data-save type="button">保存修改</button>
+      </div>
+      <p data-err class="hint" style="color:#c83d4d;min-height:18px;margin:8px 0 0"></p>
+    </div>`;
+    document.body.append(wrap);
+    const close=()=>wrap.remove();
+    const showErr=(msg)=>{wrap.querySelector('[data-err]').textContent=msg;};
+    wrap.querySelector('[data-cancel]').onclick=close;
+    wrap.querySelector('[data-save]').onclick=async()=>{
+      const caption=wrap.querySelector('#edit-caption').value.trim();
+      const tagsRaw=wrap.querySelector('#edit-tags').value.trim();
+      const name=wrap.querySelector('#edit-name').value.trim();
+      if(!caption) return showErr('图片含义（caption）不能为空：空语义无法进入检索池');
+      if(!name) return showErr('模板名称不能为空');
+      try{
+        await api(`/templates/${templateId}`,{method:'PUT',body:{name,caption,tags:tagsRaw,description:t.description||''}});
+        close(); status('已保存，语义池与向量正在同步');
+        await load();
+      }catch(e){ showErr(e.message||'保存失败'); }
+    };
+  }
   draw(); load();
   (async function modeBar(){
     const cur=document.querySelector('#mode-current'), desc=document.querySelector('#mode-desc');

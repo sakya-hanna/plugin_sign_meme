@@ -33,6 +33,7 @@ class SignMemePlugin(Star):
         self.config = config
         self.service.sign_mode_provider = lambda: self.sign_mode
         self._compat_upstream_missing = False
+        self._vector_flush_tasks: set[asyncio.Task] = set()
         self._probe_upstream_compat()
         self._register_routes()
         self.logger.info(
@@ -184,6 +185,29 @@ class SignMemePlugin(Star):
         if self.sign_mode == "integrated" and summary.get("ok"):
             await self._rebuild_pool_vectors()
 
+    def _schedule_pool_vector_flush(self) -> None:
+        """消费语义池 pending 向量队列(创建/更新模板后调用,容错不抛)。"""
+        entry_ids = self.service.drain_pending_vector_ids()
+        if not entry_ids:
+            return
+        self.logger.info(
+            "event=sign_pool_vector_flush_scheduled entry_ids=%d", len(entry_ids)
+        )
+
+        async def _run() -> None:
+            result = await self._rebuild_pool_vectors(entry_ids)
+            self.logger.info(
+                "event=sign_pool_vector_flushed entry_ids=%d ok=%s reason=%s",
+                len(entry_ids),
+                result.get("ok"),
+                result.get("reason", ""),
+            )
+
+        task = asyncio.create_task(_run())
+        # 后台任务:持有引用防 GC;失败已在 _run 内记录,这里仅防未 awaits 警告
+        self._vector_flush_tasks.add(task)
+        task.add_done_callback(self._vector_flush_tasks.discard)
+
     def _register_routes(self) -> None:
         routes = [
             (f"/{PLUGIN_NAME}/templates", self.api_templates, ["GET"], "列出举牌模板"),
@@ -261,6 +285,7 @@ class SignMemePlugin(Star):
                     rect=json_data.get("rect"),
                 )
                 logger.info("event=template_create_succeeded request_id=%s template_id=%s", request_id, result["id"])
+                self._schedule_pool_vector_flush()
                 return json_response({"template": result, "request_id": request_id}, status_code=201)
             except SignMemeError as exc:
                 logger.warning("event=template_create_failed request_id=%s error_code=%s", request_id, exc.code)
@@ -343,6 +368,7 @@ class SignMemePlugin(Star):
                 visible_text="",
                 rect=data.get("rect"),
             )
+            self._schedule_pool_vector_flush()
             return json_response({"template": result})
         except SignMemeError as exc:
             return self._error(exc.message, 404 if exc.code == "not_found" else 400)
