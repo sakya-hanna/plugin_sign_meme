@@ -244,6 +244,26 @@ Plugin Page Bridge 只有 `apiGet`/`apiPost` 两个方法。此前页面 `api()`
 3. 回归用例：创建临时模板 → `POST /templates/<id>/delete` → 确认列表中
    消失（本轮已跑通：BRIDGE-DELETE-REGRESSION=PASS）。
 
+### iframe sandbox 禁用原生弹窗：确认必须用 confirmBox（2026-09-11 修复）
+
+Dashboard 插件页 iframe 固定
+`sandbox="allow-scripts allow-forms allow-downloads"`（无 `allow-modals`，
+改在宿主侧注入不现实——sandbox 由 Dashboard 源码写死）。sandbox 下
+`window.confirm`/`alert`/`prompt` 被浏览器**静默拦截**：不弹窗、confirm
+直接返回 false。此前模式切换按钮用 `window.confirm` 做二次确认，表现为
+"点击没反应"（JS 在确认处 return，`/mode/reconcile` 请求根本不发）。
+
+修复：页面提供通用自绘确认弹窗 `confirmBox(message, okText, danger)`，
+遮罩点击可关闭；`confirmDelete` 也收敛到它。
+
+防回归要点：
+1. 举牌模板页（及所有插件页）**禁止再引入 window.confirm/alert/prompt**，
+   一律用 `confirmBox()`——sandbox 不会报错，只会静默失败，极难排查；
+2. "按钮点了没反应"类问题先查三件事：请求有没有发出去（服务端日志）、
+   有没有原生弹窗被 sandbox 拦截、bridge 是否就绪（页面顶部通信组件检查）；
+3. 页面 HTML 由服务端每次请求现读（`read_plugin_page_text` +
+   `Cache-Control: no-store`），改页面文件只需浏览器强刷，无需重启容器。
+
 ### 模板图片选择与牌面矩形预览
 
 创建模板页面的本地图片选择链路依赖以下三个 DOM 引用：
