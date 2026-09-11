@@ -22,7 +22,14 @@
     #canvas { max-width: 100%; border: 1px dashed #8390a8; background: #fafbff; cursor: crosshair; touch-action: none; }
     .points { font-family: ui-monospace, monospace; color: #47546c; font-size: 12px; white-space: pre-wrap; }
     .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-    .status { min-height: 22px; margin-top: 10px; color: #3152ba; } .error { color: #c83d4d; }
+    #toast-stack { position: fixed; top: 16px; right: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
+    .toast { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid; box-shadow: 0 8px 24px #20232a1f; font-size: 14px; animation: toast-in .18s ease-out; word-break: break-word; }
+    .toast-success { background: #e7f6ee; border-color: #9fd8ba; color: #14603c; }
+    .toast-error { background: #fdecee; border-color: #f0b6bd; color: #92293a; }
+    .toast-info { background: #edf2fd; border-color: #b9c8f2; color: #274ea8; }
+    .toast-close { background: transparent; color: inherit; padding: 0 4px; font-size: 16px; line-height: 1.2; opacity: .6; }
+    .toast-close:hover { opacity: 1; }
+    @keyframes toast-in { from { transform: translateX(12px); opacity: 0; } to { transform: none; opacity: 1; } }
     .template { display: grid; grid-template-columns: 100px 1fr auto; gap: 14px; align-items: center; border-top: 1px solid #edf0f5; padding: 14px 0; }
     .template img { width: 100px; height: 80px; object-fit: contain; background: #f4f5f8; border-radius: 8px; }
     .template h3 { margin: 0 0 5px; font-size: 16px; } .template p { margin: 3px 0; color: #687083; font-size: 13px; }
@@ -51,7 +58,6 @@
       <label for="tags">图片标签（多个标签用逗号分隔）</label><input id="tags" maxlength="1000" placeholder="例如：开心，鼓励，调皮，吐槽" />
       <label for="file">模板图片</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp" />
       <div class="toolbar"><button id="reset" class="secondary" type="button">重置标记</button><button id="save" type="button">保存模板</button></div>
-      <div id="status" class="status" role="status"></div>
     </div>
     <div>
       <h2>牌面矩形</h2>
@@ -71,14 +77,33 @@
     <div id="list" class="hint">正在读取…</div>
   </section>
 </main>
+<div id="toast-stack" aria-live="polite"></div>
 <script src="/api/plugin/page/bridge-sdk.js"></script>
 <script>
 (() => {
   const bridge = window.AstrBotPluginPage;
+  const toastStack = document.querySelector('#toast-stack');
+  function toast(message, type = 'info', options = {}) {
+    /* 页内统一通知: success=绿 error=红 info=蓝; sticky=true 不自动消失 */
+    const item = document.createElement('div');
+    item.className = `toast toast-${type}`;
+    item.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    const text = document.createElement('span');
+    text.textContent = String(message);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.textContent = '×';
+    close.setAttribute('aria-label', '关闭提示');
+    item.append(text, close);
+    toastStack.append(item);
+    const dismiss = () => item.remove();
+    close.onclick = dismiss;
+    if (!options.sticky) setTimeout(dismiss, options.duration || (type === 'error' ? 7000 : 3500));
+    return dismiss;
+  }
   if (!bridge) {
-    const statusEl = document.querySelector('#status');
-    statusEl.textContent = '页面通信组件未加载；请重新打开此页面后再试。';
-    statusEl.className = 'status error';
+    toast('页面通信组件未加载；请重新打开此页面后再试。', 'error', { sticky: true });
     console.error('[sign_meme] plugin_page_bridge_unavailable');
     return;
   }
@@ -89,10 +114,10 @@
     return raw?.data || raw?.result || raw;
   }
   const fileInput = document.querySelector('#file'), canvas = document.querySelector('#canvas'), ctx = canvas.getContext('2d');
-  const pointsEl = document.querySelector('#rect-summary'), statusEl = document.querySelector('#status');
+  const pointsEl = document.querySelector('#rect-summary');
   let image = null, points = [];
   let templatesCache = [];
-  function status(text, error = false) { statusEl.textContent = text; statusEl.className = `status${error ? ' error' : ''}`; }
+  function status(text, error = false) { toast(text, error ? 'error' : 'info'); }
   function getRect(){ return {x:Number(document.querySelector('#rect-x').value||0),y:Number(document.querySelector('#rect-y').value||0),width:Number(document.querySelector('#rect-width').value||0),height:Number(document.querySelector('#rect-height').value||0)}; }
   function setRect(rect){ ['x','y','width','height'].forEach(k=>document.querySelector(`#rect-${k}`).value=Math.round(rect[k]||0)); }
   function draw() {
@@ -113,7 +138,7 @@
   canvas.addEventListener('pointerup', e=>{dragMode=null;dragStart=null;dragRect=null;try{canvas.releasePointerCapture(e.pointerId);}catch(_){}});
   canvas.addEventListener('pointercancel', ()=>{dragMode=null;dragStart=null;dragRect=null;});
   document.querySelector('#reset').onclick = () => { if(image)setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4}); draw(); };
-  document.querySelector('#save').onclick = async () => { const f=fileInput.files[0]; if(!f) return status('请先选择图片', true); const rect=getRect(); if(rect.width<16||rect.height<16) return status('牌面宽度和高度不能小于16像素', true); status('正在上传…'); try { const uploaded=await uploadFile(f); const uploadData=uploaded?.data||uploaded?.result||uploaded; const uploadToken=uploadData?.token; if(!uploadToken) { console.error('[sign_meme] upload_response_missing_token', {keys:Object.keys(uploadData||{}), request_id:uploadData?.request_id}); throw new Error(uploadData?.message||'上传接口未返回令牌'); } console.info('[sign_meme] upload_succeeded', {request_id:uploadData?.request_id, filename:f.name, bytes:f.size}); const d0=await api('/templates',{method:'POST',body:{upload_token:uploadToken,name:document.querySelector('#name').value,description:document.querySelector('#description').value,caption:document.querySelector('#caption').value,tags:document.querySelector('#tags').value,rect}}); const d=d0?.data||d0?.result||d0; if(!d?.template) throw new Error(d?.message||'保存失败'); console.info('[sign_meme] template_create_succeeded', {request_id:d?.request_id, template_id:d.template?.id}); status('保存成功'); fileInput.value=''; image=null; draw(); await load(); } catch(e) { status(e.message||'保存失败', true); } };
+  document.querySelector('#save').onclick = async () => { const f=fileInput.files[0]; if(!f) return status('请先选择图片', true); const rect=getRect(); if(rect.width<16||rect.height<16) return status('牌面宽度和高度不能小于16像素', true); const busy=toast('正在上传…', 'info', {sticky:true}); try { const uploaded=await uploadFile(f); const uploadData=uploaded?.data||uploaded?.result||uploaded; const uploadToken=uploadData?.token; if(!uploadToken) { console.error('[sign_meme] upload_response_missing_token', {keys:Object.keys(uploadData||{}), request_id:uploadData?.request_id}); throw new Error(uploadData?.message||'上传接口未返回令牌'); } console.info('[sign_meme] upload_succeeded', {request_id:uploadData?.request_id, filename:f.name, bytes:f.size}); const d0=await api('/templates',{method:'POST',body:{upload_token:uploadToken,name:document.querySelector('#name').value,description:document.querySelector('#description').value,caption:document.querySelector('#caption').value,tags:document.querySelector('#tags').value,rect}}); const d=d0?.data||d0?.result||d0; if(!d?.template) throw new Error(d?.message||'保存失败'); console.info('[sign_meme] template_create_succeeded', {request_id:d?.request_id, template_id:d.template?.id}); busy(); toast('保存成功', 'success'); fileInput.value=''; image=null; draw(); await load(); } catch(e) { busy(); toast(e.message||'保存失败', 'error'); } };
   async function loadPreview(template) {
     const image = document.querySelector(`[data-preview-id="${template.id}"]`);
     if (!image) return;
@@ -128,8 +153,8 @@
       console.error('[sign_meme] preview_failed', {template_id:template.id, error:error?.message||String(error)});
     }
   }
-  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); if(!d.templates.length){templatesCache=[];box.textContent='暂无模板';return;} templatesCache=d.templates; box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-edit="${t.id}" class="secondary">编辑语义</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditDialog(b.dataset.edit)); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){box.textContent=e.message;box.className='hint error';} }
-  async function mutate(path, options){try{await api(path,{method:options.method||'POST',body:options.body||{}});await load();}catch(e){status(e.message||'操作失败',true);}}
+  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); box.className=''; if(!d.templates.length){templatesCache=[];box.textContent='暂无模板';return;} templatesCache=d.templates; box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-edit="${t.id}" class="secondary">编辑语义</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditDialog(b.dataset.edit)); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){ box.textContent=e.message; box.className='hint error'; toast('模板列表加载失败：'+(e.message||'未知错误'), 'error'); } }
+  async function mutate(path, options){try{await api(path,{method:options.method||'POST',body:options.body||{}});await load();}catch(e){toast(e.message||'操作失败','error');}}
   function confirmBox(message, okText, danger){/* 自绘确认弹窗: iframe sandbox 无 allow-modals, window.confirm 会被静默拦截(点确认类按钮永远返回 false), 故一律用本函数, 禁止再引入原生弹窗 */return new Promise(resolve=>{const wrap=document.createElement('div');wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:20';wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;max-width:380px;box-shadow:0 10px 40px #0003"><p style="margin:0;">${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;"><button data-cancel class="secondary">取消</button><button data-ok class="${danger?'danger':'secondary'}">${escapeHtml(okText)}</button></div></div>`;document.body.append(wrap);const finish=value=>{wrap.remove();resolve(value)};wrap.onclick=e=>{if(e.target===wrap)finish(false)};wrap.querySelector('[data-cancel]').onclick=()=>finish(false);wrap.querySelector('[data-ok]').onclick=()=>finish(true);});}
 function confirmDelete(message){return confirmBox(message,'确认删除',true);}
   function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -165,7 +190,7 @@ function confirmDelete(message){return confirmBox(message,'确认删除',true);}
       if(!name) return showErr('模板名称不能为空');
       try{
         await api(`/templates/${templateId}`,{method:'PUT',body:{name,caption,tags:tagsRaw,description:t.description||''}});
-        close(); status('已保存，语义池与向量正在同步');
+        close(); toast('已保存，语义池与向量正在同步', 'success');
         await load();
       }catch(e){ showErr(e.message||'保存失败'); }
     };
@@ -197,14 +222,15 @@ function confirmDelete(message){return confirmBox(message,'确认删除',true);}
         switchBtn.disabled = false;
       }
     };
-    try{ const raw=await api('/mode'); render(raw?.data||raw||{}); }catch(e){ cur.textContent='读取失败'; }
+    try{ const raw=await api('/mode'); render(raw?.data||raw||{}); }catch(e){ toast('运行模式读取失败：'+(e.message||'未知错误'), 'error'); }
     const btn=document.querySelector('#mode-reconcile');
     if(btn) btn.onclick=async()=>{
-      btn.disabled=true; desc.textContent='正在同步…';
+      btn.disabled=true;
+      const busy=toast('正在同步语义池…', 'info', {sticky:true});
       try{ const raw=await api('/mode/reconcile',{method:'POST',body:{}}); const d=raw?.data||raw||{};
-        desc.textContent='已同步：'+JSON.stringify(d.reconcile||d);
+        busy(); toast('语义池已同步：'+JSON.stringify(d.reconcile||d), 'success');
         try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
-      }catch(e){ desc.textContent=e.message||'同步失败'; }
+      }catch(e){ busy(); toast(e.message||'同步失败', 'error'); }
       btn.disabled=false;
     };
     if(switchBtn) switchBtn.onclick=async()=>{
@@ -213,14 +239,16 @@ function confirmDelete(message){return confirmBox(message,'确认删除',true);}
       const target=cur0==='integrated'?'standalone':'integrated';
       if(target==='integrated' && !await confirmBox('切换为对接检索模式？将把举牌模板加入表情包语义检索池。','切换为对接检索'))return;
       if(target==='standalone' && !await confirmBox('切换为独立模式？将把举牌模板从语义检索池移除。','切换为独立模式'))return;
-      switchBtn.disabled=true; desc.textContent='正在切换…';
+      switchBtn.disabled=true;
+      const busy=toast('正在切换…', 'info', {sticky:true});
       try{
         const raw=await api('/mode/reconcile',{method:'POST',body:{sign_mode:target}});
         const d=raw?.data||raw||{};
-        if(d.ok===false){ desc.textContent=d.message||'切换失败'; }
-        else{ desc.textContent='已切换为 '+(d.sign_mode===target?target:'…')+'，语义池已同步'; }
+        busy();
+        if(d.ok===false){ toast(d.message||'切换失败', 'error'); }
+        else{ toast('已切换为 '+(d.sign_mode===target?target:'…')+'，语义池已同步', 'success'); }
         try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
-      }catch(e){ desc.textContent=e.message||'切换失败'; }
+      }catch(e){ busy(); toast(e.message||'切换失败', 'error'); }
       switchBtn.disabled=false;
     };
   })();
