@@ -37,6 +37,7 @@
     <div class="hint">上传图片后默认生成居中的长方形牌面，可直接调节牌面位置、宽度和高度。</div>
     <div id="mode-bar" style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <strong>运行模式：</strong><span id="mode-current" style="color:#2f7d5c;">读取中…</span>
+      <button id="mode-switch" class="secondary" type="button" title="在独立模式与对接检索模式之间切换">切换模式</button>
       <button id="mode-reconcile" class="secondary" type="button" title="按当前配置重新对齐语义池（进池/出池），不改变配置">同步语义池</button>
       <span class="hint" id="mode-desc"></span>
     </div>
@@ -171,24 +172,29 @@
   draw(); load();
   (async function modeBar(){
     const cur=document.querySelector('#mode-current'), desc=document.querySelector('#mode-desc');
+    const switchBtn=document.querySelector('#mode-switch');
     const render=(d)=>{
       const m=d.sign_mode, compat=d.compat_status||'standalone';
       let label, hint;
       if(m==='integrated' && compat==='downgraded'){
         label='对接检索（已降级为独立模式）';
-        hint='未检测到表情包管理器（meme_manager），对接模式不可用，已临时按独立模式运行。请安装官方 meme_manager 后重启 AstrBot。';
+        hint='未检测到表情包管理器（meme_manager），对接模式不可用，已临时按独立模式运行。'+(d.upstream&&d.upstream.reasons&&d.upstream.reasons.length?('原因: '+d.upstream.reasons.join('；')):'');
         cur.style.color='#b0563c';
       }else if(m==='integrated'){
         label='对接表情包检索';
         const ver=d.compat_upstream_version?`（检测到 meme_manager ${d.compat_upstream_version}）`:'';
-        hint=`模板已进入表情包语义检索池：命中后自动生成牌面文字再渲染发送${ver}。切换请到 AstrBot 插件配置。`;
+        hint=`模板已进入表情包语义检索池：命中后自动生成牌面文字再渲染发送${ver}。`;
         cur.style.color='#2f7d5c';
       }else{
         label='独立使用';
-        hint='本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。切换请到 AstrBot 插件配置。';
+        hint='本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。';
         cur.style.color='#2f7d5c';
       }
       cur.textContent=label; desc.textContent=hint;
+      if(switchBtn){
+        switchBtn.textContent = m==='integrated' ? '切换为独立模式' : '切换为对接检索';
+        switchBtn.disabled = false;
+      }
     };
     try{ const raw=await api('/mode'); render(raw?.data||raw||{}); }catch(e){ cur.textContent='读取失败'; }
     const btn=document.querySelector('#mode-reconcile');
@@ -199,6 +205,22 @@
         try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
       }catch(e){ desc.textContent=e.message||'同步失败'; }
       btn.disabled=false;
+    };
+    if(switchBtn) switchBtn.onclick=async()=>{
+      const raw0=await api('/mode').catch(()=>null);
+      const cur0=(raw0?.data||raw0||{}).sign_mode||'standalone';
+      const target=cur0==='integrated'?'standalone':'integrated';
+      if(target==='integrated' && !window.confirm('切换为对接检索模式？将把举牌模板加入表情包语义检索池。'))return;
+      if(target==='standalone' && !window.confirm('切换为独立模式？将把举牌模板从语义检索池移除。'))return;
+      switchBtn.disabled=true; desc.textContent='正在切换…';
+      try{
+        const raw=await api('/mode/reconcile',{method:'POST',body:{sign_mode:target}});
+        const d=raw?.data||raw||{};
+        if(d.ok===false){ desc.textContent=d.message||'切换失败'; }
+        else{ desc.textContent='已切换为 '+(d.sign_mode===target?target:'…')+'，语义池已同步'; }
+        try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
+      }catch(e){ desc.textContent=e.message||'切换失败'; }
+      switchBtn.disabled=false;
     };
   })();
 })();

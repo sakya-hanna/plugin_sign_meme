@@ -16,7 +16,7 @@ from astrbot.api.web import error_response, file_response, json_response, reques
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .backend import compat
-from .backend import integrated_events, standalone_events
+from .backend import integrated_events, standalone_events, upstream_watch
 from .backend.service import SignMemeError, SignMemeService
 
 PLUGIN_NAME = "sign_meme"
@@ -101,33 +101,84 @@ class SignMemePlugin(Star):
         return await self.context.llm_generate(**kwargs)
 
     def _effective_sign_mode(self) -> str:
-        """实际生效模式: integrated 且上游可用才走 integrated,否则降级 standalone。"""
+        """实际生效模式: integrated 且上游当前可用才走 integrated,否则降级 standalone。"""
         mode = self.sign_mode
-        if mode == "integrated" and getattr(self, "_compat_upstream_missing", False):
+        if mode != "integrated":
+            return mode
+        # 运行时状态: upstream_watch 缓存 + 启动快照兜底
+        # (upstream_watch 未初始化时沿用启动探测结果)
+        if getattr(self, "_compat_upstream_missing", False):
             return "standalone"
+        watch = getattr(self, "_upstream_watch", None)
+        if watch is not None:
+            state = watch.last_known_state()
+            if state is not None and state != upstream_watch.STATE_OK:
+                return "standalone"
         return mode
 
-    def _probe_upstream_compat(self) -> None:
-        """启动时探测官方 meme_manager(零修改对接的前提)。"""
-        self._compat_upstream_missing = False
-        self._compat_upstream_version = ""
+    def _refresh_upstream_state(self, *, force: bool = False) -> dict:
+        """刷新上游能力状态;状态变迁打一条日志。返回 transition dict。
+
+        TTL 缓存在 upstream_watch 模块内;钩子高频入口调用安全。
+        """
+        watch = getattr(self, "_upstream_watch", None)
+        if watch is None:
+            return {"changed": False, "from": None, "to": None}
         try:
             data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
-            info = compat.probe_upstream(
-                Path(get_astrbot_data_path()) / "plugins", data_root
+            status, transition = watch.refresh_state(
+                self.context, data_root, force=force
             )
-            if info is None:
-                self._compat_upstream_missing = True
-                self.logger.warning(
-                    "event=compat_upstream_missing mode=integrated 将降级 standalone"
+        except Exception as exc:
+            self.logger.warning("event=upstream_watch_error error=%s", exc)
+            return {"changed": False, "from": None, "to": None}
+        self._compat_upstream_version = status.version
+        if transition.get("changed"):
+            self.logger.warning(
+                "event=upstream_state_changed from=%s to=%s reasons=%s",
+                transition.get("from"),
+                transition.get("to"),
+                ";".join(status.reasons) or "-",
+            )
+            # 变迁后同步语义池(降级→清出池;恢复→补回池),避免残留状态
+            try:
+                summary = self.service.reconcile_semantic_pool()
+                self.logger.info(
+                    "event=upstream_state_reconciled state=%s reconcile=%s",
+                    status.state,
+                    summary,
                 )
-                return
-            self._compat_upstream_version = info.version
-            self.logger.info(
-                "event=compat_upstream_detected version=%s pack=%s",
-                info.version or "unknown",
-                info.default_pack_dir.name if info.default_pack_dir else "none",
+            except Exception as exc:
+                self.logger.warning(
+                    "event=upstream_state_reconcile_failed error=%s", exc
+                )
+        return transition
+
+    def _probe_upstream_compat(self) -> None:
+        """启动时探测官方 meme_manager 能力(初始化 upstream_watch 状态)。"""
+        self._compat_upstream_missing = False
+        self._compat_upstream_version = ""
+        self._upstream_watch = upstream_watch
+        upstream_watch.configure()  # 生产默认 TTL/时钟;测试自行注入
+        try:
+            data_root = Path(get_astrbot_data_path()) / "plugin_data" / "meme_manager"
+            status, transition = upstream_watch.refresh_state(
+                self.context, data_root, force=True
             )
+            self._compat_upstream_version = status.version
+            if status.ok:
+                self.logger.info(
+                    "event=compat_upstream_detected version=%s state=%s",
+                    status.version or "unknown",
+                    status.state,
+                )
+            else:
+                # R1 未安装 = missing;其余为 degraded(装了但半坏)
+                self.logger.warning(
+                    "event=compat_upstream_missing state=%s reasons=%s",
+                    status.state,
+                    ";".join(status.reasons) or "-",
+                )
         except Exception as exc:
             self._compat_upstream_missing = True
             self.logger.warning("event=compat_probe_failed error=%s", exc)
@@ -430,7 +481,21 @@ class SignMemePlugin(Star):
     async def api_get_mode(self):
         if not self._admin_required():
             return self._error("需要管理员登录", 403)
+        # F3: 模式查询强制实时检测(绕过 TTL 缓存)
+        if self.sign_mode == "integrated":
+            self._refresh_upstream_state(force=True)
         effective = self._effective_sign_mode()
+        watch = getattr(self, "_upstream_watch", None)
+        upstream_payload: dict = {}
+        if watch is not None:
+            status = watch._cache.status
+            if status is not None:
+                upstream_payload = {
+                    "state": status.state,
+                    "ok": status.ok,
+                    "reasons": list(status.reasons),
+                    "checked_at": status.checked_at,
+                }
         return json_response({
             "sign_mode": self.sign_mode,
             "effective_sign_mode": effective,
@@ -439,33 +504,75 @@ class SignMemePlugin(Star):
                 else ("downgraded" if self.sign_mode == "integrated" else "standalone")
             ),
             "compat_upstream_version": getattr(self, "_compat_upstream_version", ""),
+            "upstream": upstream_payload,
             "sign_text_llm_provider": self.sign_text_llm_provider,
             "sign_text_llm_model": self.sign_text_llm_model,
         })
 
     async def api_reconcile_mode(self):
-        """切换模式(AstrBot 插件配置为准,此端点触发后处理)或强制重新对齐。"""
+        """切换运行模式并同步语义池;或省略 sign_mode 仅强制重新对齐。
+
+        切换流程: 先探测上游能力 → 写回插件配置(sign_mode) →
+        重载内存态 → reconcile 语义池 + 向量增量。
+        切到 integrated 但上游缺失时返回 409,不落配置。
+        """
         if not self._admin_required():
             return self._error("需要管理员登录", 403)
         data = await self._json_object()
         if data is None:
-            return self._error("请求体必须是 JSON 对象", 400)
+            data = {}
         target = str(data.get("sign_mode") or "").strip()
         if target and target not in ("standalone", "integrated"):
             return self._error("sign_mode 必须是 standalone 或 integrated", 400)
-        # 配置写入由 AstrBot 配置系统负责;这里执行 reconcile
-        # (若请求模式与当前配置不一致,提示先在配置页切换)
         current = self.sign_mode
-        if target and target != current:
-            return self._error(
-                f"配置当前为 {current};请先在插件配置中把 sign_mode 改为 {target} 再触发同步",
-                409,
-            )
-        await self._after_mode_switch()
+        if not target or target == current:
+            # 纯 reconcile: 按当前配置重新对齐
+            await self._after_mode_switch()
+            return json_response({
+                "ok": True,
+                "sign_mode": current,
+                "reconcile": self.service.reconcile_semantic_pool(),
+            })
+        # ---- 模式切换 ----
+        if target == "integrated":
+            # 切换前实时探测: 上游缺失/降级则拒绝落配置
+            self._refresh_upstream_state(force=True)
+            state = None
+            watch = getattr(self, "_upstream_watch", None)
+            if watch is not None and watch._cache.status is not None:
+                state = watch._cache.status.state
+            if state != upstream_watch.STATE_OK:
+                reasons = ";".join(
+                    watch._cache.status.reasons
+                ) if watch is not None and watch._cache.status else "upstream_unavailable"
+                return json_response(
+                    {
+                        "ok": False,
+                        "error": "upstream_unavailable",
+                        "message": f"未检测到可用的表情包管理器，无法切换到对接模式。原因: {reasons}",
+                        "upstream_state": state,
+                    },
+                    status_code=409,
+                )
+        # 写回插件配置并持久化(AstrBotConfig.save_config_async 合并写入)
+        if self.config is not None:
+            await self.config.save_config_async({"sign_mode": target})
+        # 重载内存态(sign_mode 是 property,读 self.config)
+        summary = self.service.reconcile_semantic_pool()
+        self.logger.info(
+            "event=sign_mode_switched from=%s to=%s reconcile=%s",
+            current,
+            target,
+            summary,
+        )
+        if target == "integrated" and summary.get("ok"):
+            await self._rebuild_pool_vectors()
+        upstream_watch.reset_cache()  # 强制下次钩子按新模式重探
         return json_response({
             "ok": True,
-            "sign_mode": current,
-            "reconcile": self.service.reconcile_semantic_pool(),
+            "sign_mode": target,
+            "previous": current,
+            "reconcile": summary,
         })
 
     async def api_generate(self):
@@ -516,6 +623,10 @@ class SignMemePlugin(Star):
 
     @filter.on_llm_request()
     async def on_llm_request_sign(self, event: AstrMessageEvent, req: ProviderRequest):
+        # F2: 运行时上游能力重探(模块级 TTL 缓存,高频入口安全)。
+        # 上游被停用/卸载→60s 内降级;恢复→自动回升并 reconcile。
+        if self.sign_mode == "integrated":
+            self._refresh_upstream_state()
         if self._effective_sign_mode() == "standalone":
             await standalone_events.handle_llm_request(self, event, req)
         elif hasattr(self, "_compat_upstream_missing") and self._compat_upstream_missing:
