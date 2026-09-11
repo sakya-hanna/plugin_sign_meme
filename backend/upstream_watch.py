@@ -70,6 +70,11 @@ def last_known_state() -> str | None:
     return _last_state
 
 
+def current_status() -> UpstreamStatus | None:
+    """当前缓存的一次检测结果(L3: 供 Web API 读取,避免摸私有 _cache)。"""
+    return _cache.status
+
+
 def _reason(status: UpstreamStatus, code: str, detail: str) -> None:
     status.reasons.append(f"{code} {detail}")
 

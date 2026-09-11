@@ -47,6 +47,13 @@ class SignMemePlugin(Star):
             self.logger.info("event=sign_pool_startup_reconcile %s", summary)
         except Exception as exc:
             self.logger.warning("event=sign_pool_startup_reconcile_failed error=%s", exc)
+        # H3: 启动时清扫 staging/generated 超 TTL 的历史残留
+        try:
+            swept = self.service.sweep_expired()
+            if any(swept.values()):
+                self.logger.info("event=sign_startup_sweep %s", swept)
+        except Exception as exc:
+            self.logger.warning("event=sign_startup_sweep_failed error=%s", exc)
 
     # ---- 模式与配置 ----
 
@@ -488,7 +495,7 @@ class SignMemePlugin(Star):
         watch = getattr(self, "_upstream_watch", None)
         upstream_payload: dict = {}
         if watch is not None:
-            status = watch._cache.status
+            status = watch.current_status()
             if status is not None:
                 upstream_payload = {
                     "state": status.state,
@@ -539,12 +546,15 @@ class SignMemePlugin(Star):
             self._refresh_upstream_state(force=True)
             state = None
             watch = getattr(self, "_upstream_watch", None)
-            if watch is not None and watch._cache.status is not None:
-                state = watch._cache.status.state
+            status = watch.current_status() if watch is not None else None
+            if status is not None:
+                state = status.state
             if state != upstream_watch.STATE_OK:
-                reasons = ";".join(
-                    watch._cache.status.reasons
-                ) if watch is not None and watch._cache.status else "upstream_unavailable"
+                reasons = (
+                    ";".join(status.reasons)
+                    if status is not None
+                    else "upstream_unavailable"
+                )
                 return json_response(
                     {
                         "ok": False,
@@ -581,7 +591,22 @@ class SignMemePlugin(Star):
         data = await self._json_object()
         if data is None:
             return self._error("请求体必须是 JSON 对象", 400)
-        result = self.service.generate(data.get("sign_text"), request_id=secrets.token_hex(8))
+        try:
+            # M3: 渲染含 PIL 合成+磁盘写,放线程池,不阻塞 event loop
+            # (与 generate_for_meme_manager 的 to_thread 路径保持一致)。
+            result = await asyncio.to_thread(
+                self.service.generate,
+                data.get("sign_text"),
+                request_id=secrets.token_hex(8),
+            )
+        except SignMemeError as exc:
+            # M1(2026-09-11): text_overflow 等渲染校验异常此前无一层接住,
+            # 会变成 500。业务校验失败按 422 返回,与 skipped 响应同构。
+            logger.warning("event=api_generate_rejected error_code=%s", exc.code)
+            return json_response(
+                {"ok": False, "error_code": exc.code, "error": exc.message},
+                status_code=422,
+            )
         if not result.get("ok"):
             return json_response(result, status_code=422 if not result.get("skipped") else 200)
         return json_response(result)
@@ -660,9 +685,12 @@ class SignMemePlugin(Star):
         if self._effective_sign_mode() == "integrated":
             await integrated_events.after_message_sent(self, event)
         await standalone_events.handle_after_message_sent(self, event)
-
-    async def cleanup_generated(self, path: str) -> bool:
-        return await asyncio.to_thread(self.service.cleanup, path)
+        # H3: 顺带 TTL 清扫临时目录残留(内部自吞异常,节流无害;
+        # 目录大时 iterdir 开销远小于渲染,不构成每轮负担)。
+        try:
+            await asyncio.to_thread(self.service.sweep_expired)
+        except Exception:
+            pass
 
     async def save_generated(self, path: str, *, request_id: str | None = None) -> dict:
         """第一版收藏接口：复制临时文件到 saved，并返回永久路径。"""

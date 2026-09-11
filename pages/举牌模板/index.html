@@ -5,78 +5,169 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>举牌模板</title>
   <style>
-    :root { color-scheme: light; font-family: system-ui, sans-serif; }
-    body { margin: 0; padding: 24px; background: #f6f7fb; color: #20232a; }
-    main { max-width: 1100px; margin: auto; }
-    .panel { background: #fff; border: 1px solid #e3e6ee; border-radius: 14px; padding: 20px; margin-bottom: 18px; box-shadow: 0 4px 18px #20232a0a; }
-    h1 { margin: 0 0 8px; } h2 { margin-top: 0; font-size: 18px; }
-    .hint { color: #687083; font-size: 13px; }
-    label { display: block; margin: 12px 0 6px; font-weight: 600; }
-    input, textarea, button { font: inherit; }
-    input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #ccd2df; border-radius: 8px; padding: 9px; }
-    textarea { min-height: 70px; resize: vertical; }
-    button { border: 0; border-radius: 8px; background: #315efb; color: white; padding: 9px 14px; cursor: pointer; }
-    button.secondary { background: #edf1fb; color: #3152ba; } button.danger { background: #c83d4d; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    .grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 18px; }
-    #canvas { max-width: 100%; border: 1px dashed #8390a8; background: #fafbff; cursor: crosshair; touch-action: none; }
-    .points { font-family: ui-monospace, monospace; color: #47546c; font-size: 12px; white-space: pre-wrap; }
-    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
-    #toast-stack { position: fixed; top: 16px; right: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
-    .toast { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid; box-shadow: 0 8px 24px #20232a1f; font-size: 14px; animation: toast-in .18s ease-out; word-break: break-word; }
-    .toast-success { background: #e7f6ee; border-color: #9fd8ba; color: #14603c; }
-    .toast-error { background: #fdecee; border-color: #f0b6bd; color: #92293a; }
-    .toast-info { background: #edf2fd; border-color: #b9c8f2; color: #274ea8; }
-    .toast-close { background: transparent; color: inherit; padding: 0 4px; font-size: 16px; line-height: 1.2; opacity: .6; }
-    .toast-close:hover { opacity: 1; }
-    @keyframes toast-in { from { transform: translateX(12px); opacity: 0; } to { transform: none; opacity: 1; } }
-    .template { display: grid; grid-template-columns: 100px 1fr auto; gap: 14px; align-items: center; border-top: 1px solid #edf0f5; padding: 14px 0; }
-    .template img { width: 100px; height: 80px; object-fit: contain; background: #f4f5f8; border-radius: 8px; }
-    .template h3 { margin: 0 0 5px; font-size: 16px; } .template p { margin: 3px 0; color: #687083; font-size: 13px; }
-    .active { color: #18804b !important; font-weight: 700; }
-    @media (max-width: 720px) { body { padding: 12px; } .grid { grid-template-columns: 1fr; } .template { grid-template-columns: 72px 1fr; } .template img { width: 72px; height: 64px; } .template .actions { grid-column: 1 / -1; } }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #f5f7fb; --surface: #ffffff; --surface-soft: #f8faff; --surface-hover: #f2f5ff;
+      --text: #172033; --text-soft: #526079; --text-muted: #7b879c;
+      --line: #e3e8f2; --line-strong: #ccd5e4; --primary: #5267d8; --primary-hover: #4157c7;
+      --primary-soft: #edf0ff; --success: #198754; --success-soft: #e9f8f0;
+      --danger: #c53c53; --danger-soft: #fff0f2; --warning: #a65d18; --warning-soft: #fff6e9;
+      --radius: 14px; --radius-sm: 9px; --shadow: 0 8px 28px rgba(28, 45, 78, .07);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .52; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(82,103,216,.22); outline-offset: 2px; }
+    main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 44px; }
+    .app-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+    .eyebrow { color: var(--primary); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 5px 0 7px; font-size: clamp(26px, 3vw, 34px); letter-spacing: -.04em; line-height: 1.12; }
+    h2 { margin: 0; font-size: 17px; letter-spacing: -.015em; } h3 { margin: 0; }
+    .hint { color: var(--text-soft); font-size: 13px; line-height: 1.6; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .panel-head { display:flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 0; }
+    .panel-body { padding: 20px; }
+    .stats { display:grid; grid-template-columns: repeat(2, minmax(110px, 1fr)); gap: 10px; min-width: 246px; }
+    .stat { padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+    .stat .value { display:block; color: var(--text); font-size: 22px; font-weight: 760; line-height: 1.05; }
+    .stat .label { display:block; margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+    .mode-panel { margin-bottom: 18px; padding: 15px 18px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .mode-copy { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+    .mode-dot { width:9px; height:9px; flex: 0 0 9px; border-radius:50%; background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); margin-top: 6px; }
+    .mode-title { font-size: 13px; color: var(--text-muted); } #mode-current { display:block; margin:2px 0; font-size:14px; font-weight:720; }
+    .mode-actions, .toolbar, .card-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    button { min-height: 36px; border: 1px solid transparent; border-radius: 8px; padding: 8px 12px; background: var(--primary); color: #fff; font-size: 13px; font-weight: 680; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+    button:hover:not(:disabled) { background: var(--primary-hover); }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button.secondary { background: var(--surface); border-color: var(--line-strong); color: #354565; }
+    button.secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: #bcc8db; }
+    button.danger { background: var(--danger); } button.danger:hover:not(:disabled) { background:#aa3045; }
+    .workspace { display:grid; grid-template-columns: minmax(300px, .9fr) minmax(390px, 1.1fr); gap:18px; margin-bottom:18px; }
+    .form-grid { display:grid; gap: 13px; }
+    label { display:block; color:#34425c; margin-bottom:6px; font-size:13px; font-weight:700; }
+    .field-help { margin:5px 0 0; color:var(--text-muted); font-size:12px; line-height:1.45; }
+    input, textarea, select { width:100%; border:1px solid var(--line-strong); border-radius:8px; background:#fff; color:var(--text); padding:10px 11px; line-height:1.35; }
+    input::placeholder, textarea::placeholder { color:#9aa6b8; }
+    textarea { min-height:76px; resize:vertical; }
+    input[type=file] { padding:8px; background:var(--surface-soft); }
+    .form-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:5px; }
+    .canvas-wrap { position:relative; display:grid; place-items:center; min-height:340px; overflow:hidden; border:1px dashed #b9c5d9; border-radius:11px; background:linear-gradient(135deg, #fbfcff, #f2f5fb); }
+    #canvas { display:block; max-width:100%; width:640px; height:auto; cursor:crosshair; touch-action:none; }
+    .canvas-empty { position:absolute; display:grid; place-items:center; gap:7px; color:var(--text-muted); text-align:center; pointer-events:none; }
+    .canvas-empty strong { color:var(--text-soft); font-size:14px; }
+    .rect-summary { min-height:20px; margin-top:10px; color:var(--text-soft); font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+    .asset-panel { overflow:hidden; }
+    .asset-head { padding:20px; border-bottom:1px solid var(--line); }
+    .asset-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    #template-result-count { display:inline-flex; align-items:center; min-height:25px; padding:3px 9px; border-radius:999px; color:#43516c; background:#eef2f8; font-size:12px; font-weight:700; white-space:nowrap; }
+    .asset-controls { display:grid; grid-template-columns:minmax(170px, 1fr) 150px 140px auto; gap:9px; margin-top:15px; }
+    .asset-controls input, .asset-controls select { height:38px; padding-top:8px; padding-bottom:8px; }
+    #clear-template-filters { white-space:nowrap; }
+    .template-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; padding:20px; }
+    .template-card { display:flex; flex-direction:column; min-width:0; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--surface); transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease; }
+    .template-card:hover { border-color:#c5d0e3; box-shadow:0 9px 22px rgba(36,56,94,.09); transform:translateY(-1px); }
+    .template-preview { position:relative; height:216px; display:grid; place-items:center; overflow:hidden; background:var(--surface-soft); border-bottom:1px solid var(--line); }
+    .template-preview-button { width:100%; padding:0; border:0; border-radius:0; color:inherit; cursor:zoom-in; }
+    .template-preview-button:hover:not(:disabled) { background:var(--surface-soft); }
+    .template-preview-button::after { content:'点击查看完整图片'; position:absolute; right:10px; bottom:10px; padding:5px 8px; border-radius:6px; background:rgba(20,31,51,.72); color:#fff; font-size:11px; font-weight:700; opacity:0; transform:translateY(3px); transition:opacity .15s ease, transform .15s ease; }
+    .template-preview-button:hover::after, .template-preview-button:focus-visible::after { opacity:1; transform:none; }
+    .template-preview-frame { width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .template-preview img { display:block !important; width:auto !important; height:auto !important; max-width:100% !important; max-height:100% !important; object-fit:contain !important; object-position:center !important; }
+    .preview-placeholder { color:var(--text-muted); font-size:13px; }
+    .badge { display:inline-flex; align-items:center; gap:5px; max-width:100%; min-height:23px; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:740; line-height:1; }
+    .badge-active { color:#12643b; background:var(--success-soft); } .badge-neutral { color:#59677f; background:#eef2f7; }
+    .card-status { position:absolute; top:10px; right:10px; box-shadow:0 2px 6px rgba(26,40,68,.08); }
+    .template-content { display:flex; flex:1; flex-direction:column; gap:10px; padding:14px; }
+    .template-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:15px; }
+    .caption { display:-webkit-box; min-height:39px; overflow:hidden; color:var(--text-soft); font-size:12px; line-height:1.55; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+    .tag-list { display:flex; flex-wrap:wrap; gap:5px; min-height:24px; }
+    .tag { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 7px; border:1px solid #dce3f4; border-radius:6px; color:#536386; background:#f4f6fc; font-size:11px; }
+    .meta-row { display:flex; flex-wrap:wrap; gap:6px 10px; padding-top:9px; border-top:1px solid #eef1f6; color:var(--text-muted); font-size:11px; }
+    .card-actions { margin-top:auto; padding-top:2px; } .card-actions button { min-height:33px; padding:6px 9px; font-size:12px; }
+    .empty-state { display:grid; place-items:center; min-height:230px; padding:28px; text-align:center; color:var(--text-soft); }
+    .empty-icon { display:grid; place-items:center; width:42px; height:42px; margin-bottom:10px; border-radius:13px; color:var(--primary); background:var(--primary-soft); font-size:21px; }
+    .empty-state p { max-width:330px; margin:7px 0 14px; color:var(--text-muted); font-size:13px; line-height:1.55; }
+    #toast-stack { position:fixed; top:16px; right:16px; z-index:100; display:flex; flex-direction:column; gap:8px; max-width:min(380px, calc(100vw - 32px)); }
+    .toast { display:flex; align-items:flex-start; gap:10px; padding:11px 12px; border:1px solid; border-radius:10px; box-shadow:0 10px 28px rgba(24,38,66,.16); font-size:13px; line-height:1.45; animation:toast-in .18s ease-out; word-break:break-word; }
+    .toast-success { color:#14603c; background:#e7f6ee; border-color:#9fd8ba; } .toast-error { color:#92293a; background:#fdecee; border-color:#f0b6bd; } .toast-info { color:#274ea8; background:#edf2fd; border-color:#b9c8f2; }
+    .toast-close { min-height:0; margin:-1px -3px -1px auto; padding:0 4px; border:0; background:transparent; color:inherit; font-size:17px; line-height:1.2; opacity:.6; } .toast-close:hover { background:transparent; opacity:1; }
+    .dialog-backdrop { position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:18px; background:rgba(20,31,51,.42); }
+    #image-preview-dialog[hidden] { display:none; }
+    .dialog { width:min(500px, 100%); max-height:min(720px, calc(100vh - 36px)); overflow:auto; padding:20px; border-radius:14px; background:#fff; box-shadow:0 20px 60px rgba(15,25,44,.25); }
+    .image-dialog { width:min(1120px, 100%); padding:14px; }
+    .dialog-image { display:block; width:auto; max-width:100%; max-height:calc(100vh - 112px); margin:0 auto; object-fit:contain; border-radius:9px; background:var(--surface-soft); }
+    .dialog h3 { margin:0 0 5px; } .dialog-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; } .dialog-error { min-height:18px; margin:9px 0 0; color:var(--danger); font-size:13px; }
+    @keyframes toast-in { from { transform:translateX(12px); opacity:0; } to { transform:none; opacity:1; } }
+    @media (max-width: 860px) { .app-header { flex-direction:column; } .stats { width:100%; max-width:360px; } .workspace { grid-template-columns:1fr; } .asset-controls { grid-template-columns:1fr 1fr; } }
+    @media (max-width: 560px) { main { padding:18px 12px 32px; } .mode-panel { align-items:flex-start; flex-direction:column; } .asset-controls { grid-template-columns:1fr; } .template-grid { grid-template-columns:1fr; padding:12px; } .panel-head, .panel-body, .asset-head { padding-left:15px; padding-right:15px; } .form-footer { align-items:stretch; flex-direction:column; } .form-footer button { width:100%; } }
   </style>
 </head>
 <body>
 <main>
-  <section class="panel">
-    <h1>举牌模板</h1>
-    <div class="hint">上传图片后默认生成居中的长方形牌面，可直接调节牌面位置、宽度和高度。</div>
-    <div id="mode-bar" style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <strong>运行模式：</strong><span id="mode-current" style="color:#2f7d5c;">读取中…</span>
-      <button id="mode-switch" class="secondary" type="button" title="在独立模式与对接检索模式之间切换">切换模式</button>
-      <button id="mode-reconcile" class="secondary" type="button" title="按当前配置重新对齐语义池（进池/出池），不改变配置">同步语义池</button>
-      <span class="hint" id="mode-desc"></span>
+  <header class="app-header">
+    <div>
+      <div class="eyebrow">Sign Meme · Asset Studio</div>
+      <h1>举牌模板工作台</h1>
+      <div class="hint">管理模板图片、牌面区域与语义信息；所有改动将按当前模式同步至运行链路。</div>
     </div>
+    <div class="stats" aria-label="模板概览">
+      <div class="stat"><span id="template-total" class="value">—</span><span class="label">模板总数</span></div>
+      <div class="stat"><span id="template-active-total" class="value">—</span><span class="label">当前激活</span></div>
+    </div>
+  </header>
+
+  <section class="panel mode-panel" aria-label="运行模式">
+    <div class="mode-copy"><span id="mode-dot" class="mode-dot"></span><div><span class="mode-title">运行模式</span><span id="mode-current">读取中…</span><span id="mode-desc" class="hint"></span></div></div>
+    <div class="mode-actions"><button id="mode-reconcile" class="secondary" type="button">同步语义池</button><button id="mode-switch" type="button">切换模式</button></div>
   </section>
-  <section class="panel grid">
-    <div>
-      <h2>创建模板</h2>
-      <label for="name">模板名称</label><input id="name" maxlength="80" placeholder="例如：汉娜举牌" />
-      <label for="description">管理备注</label><textarea id="description" maxlength="500" placeholder="模板管理备注"></textarea>
-      <label for="caption">图片含义（caption）</label><textarea id="caption" maxlength="1000" placeholder="描述这个模板适合表达的情绪、语气、动作或聊天场景"></textarea>
-      <label for="tags">图片标签（多个标签用逗号分隔）</label><input id="tags" maxlength="1000" placeholder="例如：开心，鼓励，调皮，吐槽" />
-      <label for="file">模板图片</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp" />
-      <div class="toolbar"><button id="reset" class="secondary" type="button">重置标记</button><button id="save" type="button">保存模板</button></div>
-    </div>
-    <div>
-      <h2>牌面矩形</h2>
-      <canvas id="canvas" width="640" height="480"></canvas>
-      <div class="points">
-        <div>拖动矩形内部可移动牌面，拖动四个角点可调整宽度和高度。</div>
-        <div id="rect-summary">尚未选择图片</div>
-        <input id="rect-x" type="hidden" />
-        <input id="rect-y" type="hidden" />
-        <input id="rect-width" type="hidden" />
-        <input id="rect-height" type="hidden" />
+
+  <section class="workspace" aria-label="创建模板工作区">
+    <article class="panel">
+      <div class="panel-head"><div><h2>新建模板</h2><div class="hint">上传底图后在右侧定位牌面矩形。</div></div></div>
+      <div class="panel-body">
+        <div class="form-grid">
+          <div><label for="name">模板名称</label><input id="name" maxlength="80" placeholder="例如：汉娜举牌" /></div>
+          <div><label for="description">管理备注</label><textarea id="description" maxlength="500" placeholder="仅用于管理和检索补充说明"></textarea></div>
+          <div><label for="caption">图片含义（caption）</label><textarea id="caption" maxlength="1000" placeholder="描述适合表达的情绪、语气、动作或聊天场景"></textarea><p class="field-help">该语义会用于对接检索模式的候选匹配。</p></div>
+          <div><label for="tags">图片标签</label><input id="tags" maxlength="1000" placeholder="多个标签用逗号分隔，例如：开心，鼓励，吐槽" /></div>
+          <div><label for="file">模板图片</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp" /><p class="field-help">支持 PNG、JPG、JPEG、WEBP，最大 32MB。</p></div>
+          <div class="form-footer"><button id="reset" class="secondary" type="button">重置牌面区域</button><button id="save" type="button">保存模板</button></div>
+        </div>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-head"><div><h2>牌面矩形</h2><div class="hint">拖动矩形内部移动；拖动边或角调整尺寸。</div></div></div>
+      <div class="panel-body">
+        <div class="canvas-wrap"><canvas id="canvas" width="640" height="480"></canvas><div id="canvas-empty" class="canvas-empty"><strong>尚未选择图片</strong><span class="hint">选择模板图片后，即可标记文字牌面区域</span></div></div>
+        <div id="rect-summary" class="rect-summary">尚未选择图片</div>
+        <input id="rect-x" type="hidden" /><input id="rect-y" type="hidden" /><input id="rect-width" type="hidden" /><input id="rect-height" type="hidden" />
+      </div>
+    </article>
+  </section>
+
+  <section class="panel asset-panel" aria-label="已创建模板">
+    <div class="asset-head">
+      <div class="asset-title-row"><div><h2>模板资产库</h2><div class="hint">从已加载的模板中搜索、筛选和排序，不会修改任何数据。</div></div><span id="template-result-count">正在读取…</span></div>
+      <div class="asset-controls">
+        <input id="template-search" type="search" placeholder="搜索名称、语义、标签或文件名" aria-label="搜索模板" />
+        <select id="template-status-filter" aria-label="按状态筛选"><option value="all">全部状态</option><option value="active">当前激活</option><option value="inactive">未激活</option></select>
+        <select id="template-sort" aria-label="模板排序"><option value="updated">最近更新</option><option value="name">名称</option><option value="version">版本号</option></select>
+        <button id="clear-template-filters" class="secondary" type="button">清除筛选</button>
       </div>
     </div>
-  </section>
-  <section class="panel">
-    <h2>已创建模板</h2>
-    <div id="list" class="hint">正在读取…</div>
+    <div id="list" class="template-grid" aria-live="polite"></div>
+    <div id="template-empty-state" class="empty-state" hidden><div class="empty-icon">⌕</div><strong id="template-empty-title">没有匹配的模板</strong><p id="template-empty-copy">尝试调整关键词或筛选条件。</p><button id="empty-clear-template-filters" class="secondary" type="button">清除筛选</button></div>
   </section>
 </main>
+<div id="image-preview-dialog" class="dialog-backdrop" hidden>
+  <div class="dialog image-dialog" role="dialog" aria-modal="true" aria-label="完整图片预览">
+    <div class="dialog-footer" style="margin:0 0 10px"><button id="image-preview-close" class="secondary" type="button">关闭预览</button></div>
+    <img id="image-preview-full" class="dialog-image" alt="完整模板图片" />
+  </div>
+</div>
 <div id="toast-stack" aria-live="polite"></div>
 <script src="/api/plugin/page/bridge-sdk.js"></script>
 <script>
@@ -84,174 +175,58 @@
   const bridge = window.AstrBotPluginPage;
   const toastStack = document.querySelector('#toast-stack');
   function toast(message, type = 'info', options = {}) {
-    /* 页内统一通知: success=绿 error=红 info=蓝; sticky=true 不自动消失 */
-    const item = document.createElement('div');
-    item.className = `toast toast-${type}`;
-    item.setAttribute('role', type === 'error' ? 'alert' : 'status');
-    const text = document.createElement('span');
-    text.textContent = String(message);
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'toast-close';
-    close.textContent = '×';
-    close.setAttribute('aria-label', '关闭提示');
-    item.append(text, close);
-    toastStack.append(item);
-    const dismiss = () => item.remove();
-    close.onclick = dismiss;
-    if (!options.sticky) setTimeout(dismiss, options.duration || (type === 'error' ? 7000 : 3500));
-    return dismiss;
+    const item = document.createElement('div'); item.className = `toast toast-${type}`; item.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    const text = document.createElement('span'); text.textContent = String(message);
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'toast-close'; close.textContent = '×'; close.setAttribute('aria-label', '关闭提示');
+    item.append(text, close); toastStack.append(item); const dismiss = () => item.remove(); close.onclick = dismiss;
+    if (!options.sticky) setTimeout(dismiss, options.duration || (type === 'error' ? 7000 : 3500)); return dismiss;
   }
-  if (!bridge) {
-    toast('页面通信组件未加载；请重新打开此页面后再试。', 'error', { sticky: true });
-    console.error('[sign_meme] plugin_page_bridge_unavailable');
-    return;
-  }
+  if (!bridge) { toast('页面通信组件未加载；请重新打开此页面后再试。', 'error', {sticky:true}); console.error('[sign_meme] plugin_page_bridge_unavailable'); return; }
   const api = async (path, options = {}) => { await bridge.ready(); const endpoint=path.replace(/^\//,''); const method=(options.method||'GET').toUpperCase(); if(method==='GET') return bridge.apiGet(endpoint, options.params||{}); if(method==='DELETE') return bridge.apiPost(endpoint.replace(/\/?$/,'')+'/delete', options.body||{}); return bridge.apiPost(endpoint, options.body||{}); };
-  async function uploadFile(file) {
-    await bridge.ready();
-    const raw = await bridge.upload('upload', file);
-    return raw?.data || raw?.result || raw;
-  }
-  const fileInput = document.querySelector('#file'), canvas = document.querySelector('#canvas'), ctx = canvas.getContext('2d');
-  const pointsEl = document.querySelector('#rect-summary');
-  let image = null, points = [];
-  let templatesCache = [];
-  function status(text, error = false) { toast(text, error ? 'error' : 'info'); }
+  async function uploadFile(file) { await bridge.ready(); const raw = await bridge.upload('upload', file); return raw?.data || raw?.result || raw; }
+  const fileInput=document.querySelector('#file'), canvas=document.querySelector('#canvas'), ctx=canvas.getContext('2d'), pointsEl=document.querySelector('#rect-summary'), canvasEmpty=document.querySelector('#canvas-empty');
+  const list=document.querySelector('#list'), emptyState=document.querySelector('#template-empty-state'), resultCount=document.querySelector('#template-result-count'), searchInput=document.querySelector('#template-search'), statusFilter=document.querySelector('#template-status-filter'), sortSelect=document.querySelector('#template-sort');
+  const imagePreviewDialog=document.querySelector('#image-preview-dialog'), imagePreviewFull=document.querySelector('#image-preview-full'), imagePreviewClose=document.querySelector('#image-preview-close');
+  function closeImagePreview(){imagePreviewDialog.hidden=true;imagePreviewFull.removeAttribute('src');}
+  imagePreviewDialog.onclick=e=>{if(e.target===imagePreviewDialog)closeImagePreview();}; imagePreviewClose.onclick=closeImagePreview;
+  let image=null, templatesCache=[];
+  function status(text, error=false) { toast(text, error ? 'error' : 'info'); }
+  function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function getRect(){ return {x:Number(document.querySelector('#rect-x').value||0),y:Number(document.querySelector('#rect-y').value||0),width:Number(document.querySelector('#rect-width').value||0),height:Number(document.querySelector('#rect-height').value||0)}; }
   function setRect(rect){ ['x','y','width','height'].forEach(k=>document.querySelector(`#rect-${k}`).value=Math.round(rect[k]||0)); }
   function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (image) { const scale = Math.min(canvas.width / image.width, canvas.height / image.height); const w = image.width * scale, h = image.height * scale; ctx.drawImage(image, (canvas.width-w)/2, (canvas.height-h)/2, w, h); canvas.dataset.scale = scale; canvas.dataset.offsetX = (canvas.width-w)/2; canvas.dataset.offsetY = (canvas.height-h)/2; }
-    if(image){ const rect=getRect(), scale=Number(canvas.dataset.scale||1), ox=Number(canvas.dataset.offsetX||0), oy=Number(canvas.dataset.offsetY||0); const left=ox+rect.x*scale, top=oy+rect.y*scale, right=left+rect.width*scale, bottom=top+rect.height*scale; ctx.strokeStyle='#e43d5b';ctx.lineWidth=3;ctx.strokeRect(left,top,right-left,bottom-top); ctx.fillStyle='#e43d5b'; [[left,top],[right,top],[left,bottom],[right,bottom]].forEach(([x,y])=>ctx.fillRect(x-6,y-6,12,12)); }
-    pointsEl.textContent = image ? `矩形：x=${getRect().x}, y=${getRect().y}, ${getRect().width}×${getRect().height}` : '尚未选择图片';
+    ctx.clearRect(0,0,canvas.width,canvas.height); canvasEmpty.hidden=Boolean(image);
+    if(image){ const scale=Math.min(canvas.width/image.width,canvas.height/image.height),w=image.width*scale,h=image.height*scale; ctx.drawImage(image,(canvas.width-w)/2,(canvas.height-h)/2,w,h); canvas.dataset.scale=scale; canvas.dataset.offsetX=(canvas.width-w)/2; canvas.dataset.offsetY=(canvas.height-h)/2; const rect=getRect(),ox=Number(canvas.dataset.offsetX||0),oy=Number(canvas.dataset.offsetY||0),left=ox+rect.x*scale,top=oy+rect.y*scale; ctx.strokeStyle='#d34763';ctx.lineWidth=3;ctx.strokeRect(left,top,rect.width*scale,rect.height*scale);ctx.fillStyle='#d34763';[[left,top],[left+rect.width*scale,top],[left,top+rect.height*scale],[left+rect.width*scale,top+rect.height*scale]].forEach(([x,y])=>ctx.fillRect(x-6,y-6,12,12)); }
+    pointsEl.textContent=image?`矩形：x=${getRect().x}, y=${getRect().y}, ${getRect().width}×${getRect().height}`:'尚未选择图片';
   }
-  fileInput.addEventListener('change', () => { const f = fileInput.files[0]; if (!f) return; const url = URL.createObjectURL(f); image = new Image(); image.onload = () => { setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4}); draw(); URL.revokeObjectURL(url); }; image.src = url; });
-  let dragMode = null, dragStart = null, dragRect = null;
-  function canvasPoint(e){ const bounds=canvas.getBoundingClientRect(); const scaleX=canvas.width/Math.max(1,bounds.width); const scaleY=canvas.height/Math.max(1,bounds.height); return {x:(e.clientX-bounds.left)*scaleX,y:(e.clientY-bounds.top)*scaleY}; }
-  function sourcePoint(e){ const p=canvasPoint(e), scale=Number(canvas.dataset.scale||1), ox=Number(canvas.dataset.offsetX||0), oy=Number(canvas.dataset.offsetY||0); return {x:(p.x-ox)/scale,y:(p.y-oy)/scale}; }
-  function hitHandle(p, rect){ const hit=24; const hs=[['nw',rect.x,rect.y],['ne',rect.x+rect.width,rect.y],['sw',rect.x,rect.y+rect.height],['se',rect.x+rect.width,rect.y+rect.height]]; const corner=hs.find(([,x,y])=>Math.abs(p.x-x)<=hit&&Math.abs(p.y-y)<=hit)?.[0]; if(corner)return corner; if(Math.abs(p.x-rect.x)<=hit&&p.y>=rect.y&&p.y<=rect.y+rect.height)return 'w'; if(Math.abs(p.x-(rect.x+rect.width))<=hit&&p.y>=rect.y&&p.y<=rect.y+rect.height)return 'e'; if(Math.abs(p.y-rect.y)<=hit&&p.x>=rect.x&&p.x<=rect.x+rect.width)return 'n'; if(Math.abs(p.y-(rect.y+rect.height))<=hit&&p.x>=rect.x&&p.x<=rect.x+rect.width)return 's'; return null; }
-  function updateCursor(e){ if(!image){canvas.style.cursor='default';return;} const h=hitHandle(sourcePoint(e),getRect()); canvas.style.cursor=h&&h.length===2?(h==='nw'||h==='se'?'nwse-resize':'nesw-resize'):h?(h==='n'||h==='s'?'ns-resize':'ew-resize'):'move'; }
-  canvas.addEventListener('pointerdown', e=>{ if(!image)return; const p=sourcePoint(e), rect=getRect(), handle=hitHandle(p,rect); if(handle){dragMode=handle;} else if(p.x>=rect.x&&p.x<=rect.x+rect.width&&p.y>=rect.y&&p.y<=rect.y+rect.height){dragMode='move';} else return; dragStart=p; dragRect={...rect}; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', e=>{ if(!dragMode)updateCursor(e); });
-  canvas.addEventListener('pointermove', e=>{ if(!dragMode||!image)return; const p=sourcePoint(e), dx=p.x-dragStart.x, dy=p.y-dragStart.y, r={...dragRect}; if(dragMode==='move'){r.x=dragRect.x+dx;r.y=dragRect.y+dy;} else { if(dragMode.includes('w')){r.x=dragRect.x+dx;r.width=dragRect.width-dx;} if(dragMode.includes('e'))r.width=dragRect.width+dx; if(dragMode.includes('n')){r.y=dragRect.y+dy;r.height=dragRect.height-dy;} if(dragMode.includes('s'))r.height=dragRect.height+dy; } r.width=Math.max(16,r.width);r.height=Math.max(16,r.height);r.x=Math.max(0,Math.min(image.width-r.width,r.x));r.y=Math.max(0,Math.min(image.height-r.height,r.y));setRect(r);draw(); });
-  canvas.addEventListener('pointerup', e=>{dragMode=null;dragStart=null;dragRect=null;try{canvas.releasePointerCapture(e.pointerId);}catch(_){}});
-  canvas.addEventListener('pointercancel', ()=>{dragMode=null;dragStart=null;dragRect=null;});
-  document.querySelector('#reset').onclick = () => { if(image)setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4}); draw(); };
-  document.querySelector('#save').onclick = async () => { const f=fileInput.files[0]; if(!f) return status('请先选择图片', true); const rect=getRect(); if(rect.width<16||rect.height<16) return status('牌面宽度和高度不能小于16像素', true); const busy=toast('正在上传…', 'info', {sticky:true}); try { const uploaded=await uploadFile(f); const uploadData=uploaded?.data||uploaded?.result||uploaded; const uploadToken=uploadData?.token; if(!uploadToken) { console.error('[sign_meme] upload_response_missing_token', {keys:Object.keys(uploadData||{}), request_id:uploadData?.request_id}); throw new Error(uploadData?.message||'上传接口未返回令牌'); } console.info('[sign_meme] upload_succeeded', {request_id:uploadData?.request_id, filename:f.name, bytes:f.size}); const d0=await api('/templates',{method:'POST',body:{upload_token:uploadToken,name:document.querySelector('#name').value,description:document.querySelector('#description').value,caption:document.querySelector('#caption').value,tags:document.querySelector('#tags').value,rect}}); const d=d0?.data||d0?.result||d0; if(!d?.template) throw new Error(d?.message||'保存失败'); console.info('[sign_meme] template_create_succeeded', {request_id:d?.request_id, template_id:d.template?.id}); busy(); toast('保存成功', 'success'); fileInput.value=''; image=null; draw(); await load(); } catch(e) { busy(); toast(e.message||'保存失败', 'error'); } };
-  async function loadPreview(template) {
-    const image = document.querySelector(`[data-preview-id="${template.id}"]`);
-    if (!image) return;
-    try {
-      const raw = await api(`/image/${template.id}/preview`);
-      const data = raw?.data || raw?.result || raw;
-      if (!data?.data_url) throw new Error('预览接口未返回图片');
-      image.src = data.data_url;
-      console.info('[sign_meme] preview_succeeded', {request_id:data.request_id, template_id:template.id});
-    } catch (error) {
-      image.alt = '预览加载失败';
-      console.error('[sign_meme] preview_failed', {template_id:template.id, error:error?.message||String(error)});
-    }
-  }
-  async function load() { const box=document.querySelector('#list'); try { const raw=await api('/templates'); const d=raw?.data||raw?.result||raw; if(!d?.templates) throw new Error(d?.message||'读取失败'); box.className=''; if(!d.templates.length){templatesCache=[];box.textContent='暂无模板';return;} templatesCache=d.templates; box.innerHTML=d.templates.map(t=>`<article class="template"><img data-preview-id="${t.id}" src="" alt="正在加载预览"><div><h3>${escapeHtml(t.name)} ${t.active?'<span class="active">（当前激活）</span>':''}</h3><p>${escapeHtml(t.caption||t.description||'无图片含义')}</p><p>标签：${escapeHtml((t.tags||[]).join('、')||'无')}</p><p>图片：${t.width}×${t.height}，版本：${t.version}</p></div><div class="actions"><button data-id="${t.id}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-edit="${t.id}" class="secondary">编辑语义</button><button data-delete="${t.id}" class="danger" ${t.active?'disabled':''}>删除</button></div></article>`).join(''); d.templates.forEach(loadPreview); box.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{await mutate(`/templates/${b.dataset.id}/activate`,{});}); box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditDialog(b.dataset.edit)); box.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？激活模板不可直接删除。'))return;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});}); } catch(e){ box.textContent=e.message; box.className='hint error'; toast('模板列表加载失败：'+(e.message||'未知错误'), 'error'); } }
-  async function mutate(path, options){try{await api(path,{method:options.method||'POST',body:options.body||{}});await load();}catch(e){toast(e.message||'操作失败','error');}}
-  function confirmBox(message, okText, danger){/* 自绘确认弹窗: iframe sandbox 无 allow-modals, window.confirm 会被静默拦截(点确认类按钮永远返回 false), 故一律用本函数, 禁止再引入原生弹窗 */return new Promise(resolve=>{const wrap=document.createElement('div');wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:20';wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;max-width:380px;box-shadow:0 10px 40px #0003"><p style="margin:0;">${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;"><button data-cancel class="secondary">取消</button><button data-ok class="${danger?'danger':'secondary'}">${escapeHtml(okText)}</button></div></div>`;document.body.append(wrap);const finish=value=>{wrap.remove();resolve(value)};wrap.onclick=e=>{if(e.target===wrap)finish(false)};wrap.querySelector('[data-cancel]').onclick=()=>finish(false);wrap.querySelector('[data-ok]').onclick=()=>finish(true);});}
-function confirmDelete(message){return confirmBox(message,'确认删除',true);}
-  function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-  function openEditDialog(templateId){
-    const t = templatesCache.find(x=>x.id===templateId);
-    if(!t) return status('模板数据未加载，请刷新页面', true);
-    const wrap=document.createElement('div');
-    wrap.style='position:fixed;inset:0;background:#20232a66;display:grid;place-items:center;z-index:10';
-    wrap.innerHTML=`<div role="dialog" aria-modal="true" style="background:#fff;padding:20px;border-radius:12px;width:min(480px,92vw);box-shadow:0 10px 40px #0003">
-      <h3 style="margin:0 0 4px">编辑语义 — ${escapeHtml(t.name)}</h3>
-      <p class="hint" style="margin:0 0 8px">保存后自动同步语义池并增量重建向量，检索即可用上新语义。</p>
-      <label for="edit-caption">图片含义（caption）</label>
-      <textarea id="edit-caption" maxlength="1000" placeholder="描述这个模板适合表达的情绪、语气、动作或聊天场景">${escapeHtml(t.caption||'')}</textarea>
-      <label for="edit-tags">图片标签（多个标签用逗号分隔）</label>
-      <input id="edit-tags" maxlength="1000" value="${escapeHtml((t.tags||[]).join('，'))}" placeholder="例如：开心，鼓励，调皮，吐槽" />
-      <label for="edit-name">模板名称</label>
-      <input id="edit-name" maxlength="80" value="${escapeHtml(t.name||'')}" />
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-        <button data-cancel class="secondary" type="button">取消</button>
-        <button data-save type="button">保存修改</button>
-      </div>
-      <p data-err class="hint" style="color:#c83d4d;min-height:18px;margin:8px 0 0"></p>
-    </div>`;
-    document.body.append(wrap);
-    const close=()=>wrap.remove();
-    const showErr=(msg)=>{wrap.querySelector('[data-err]').textContent=msg;};
-    wrap.querySelector('[data-cancel]').onclick=close;
-    wrap.querySelector('[data-save]').onclick=async()=>{
-      const caption=wrap.querySelector('#edit-caption').value.trim();
-      const tagsRaw=wrap.querySelector('#edit-tags').value.trim();
-      const name=wrap.querySelector('#edit-name').value.trim();
-      if(!caption) return showErr('图片含义（caption）不能为空：空语义无法进入检索池');
-      if(!name) return showErr('模板名称不能为空');
-      try{
-        await api(`/templates/${templateId}`,{method:'PUT',body:{name,caption,tags:tagsRaw,description:t.description||''}});
-        close(); toast('已保存，语义池与向量正在同步', 'success');
-        await load();
-      }catch(e){ showErr(e.message||'保存失败'); }
-    };
-  }
-  draw(); load();
-  (async function modeBar(){
-    const cur=document.querySelector('#mode-current'), desc=document.querySelector('#mode-desc');
-    const switchBtn=document.querySelector('#mode-switch');
-    const render=(d)=>{
-      const m=d.sign_mode, compat=d.compat_status||'standalone';
-      let label, hint;
-      if(m==='integrated' && compat==='downgraded'){
-        label='对接检索（已降级为独立模式）';
-        hint='未检测到表情包管理器（meme_manager），对接模式不可用，已临时按独立模式运行。'+(d.upstream&&d.upstream.reasons&&d.upstream.reasons.length?('原因: '+d.upstream.reasons.join('；')):'');
-        cur.style.color='#b0563c';
-      }else if(m==='integrated'){
-        label='对接表情包检索';
-        const ver=d.compat_upstream_version?`（检测到 meme_manager ${d.compat_upstream_version}）`:'';
-        hint=`模板已进入表情包语义检索池：命中后自动生成牌面文字再渲染发送${ver}。`;
-        cur.style.color='#2f7d5c';
-      }else{
-        label='独立使用';
-        hint='本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。';
-        cur.style.color='#2f7d5c';
-      }
-      cur.textContent=label; desc.textContent=hint;
-      if(switchBtn){
-        switchBtn.textContent = m==='integrated' ? '切换为独立模式' : '切换为对接检索';
-        switchBtn.disabled = false;
-      }
-    };
-    try{ const raw=await api('/mode'); render(raw?.data||raw||{}); }catch(e){ toast('运行模式读取失败：'+(e.message||'未知错误'), 'error'); }
-    const btn=document.querySelector('#mode-reconcile');
-    if(btn) btn.onclick=async()=>{
-      btn.disabled=true;
-      const busy=toast('正在同步语义池…', 'info', {sticky:true});
-      try{ const raw=await api('/mode/reconcile',{method:'POST',body:{}}); const d=raw?.data||raw||{};
-        busy(); toast('语义池已同步：'+JSON.stringify(d.reconcile||d), 'success');
-        try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
-      }catch(e){ busy(); toast(e.message||'同步失败', 'error'); }
-      btn.disabled=false;
-    };
-    if(switchBtn) switchBtn.onclick=async()=>{
-      const raw0=await api('/mode').catch(()=>null);
-      const cur0=(raw0?.data||raw0||{}).sign_mode||'standalone';
-      const target=cur0==='integrated'?'standalone':'integrated';
-      if(target==='integrated' && !await confirmBox('切换为对接检索模式？将把举牌模板加入表情包语义检索池。','切换为对接检索'))return;
-      if(target==='standalone' && !await confirmBox('切换为独立模式？将把举牌模板从语义检索池移除。','切换为独立模式'))return;
-      switchBtn.disabled=true;
-      const busy=toast('正在切换…', 'info', {sticky:true});
-      try{
-        const raw=await api('/mode/reconcile',{method:'POST',body:{sign_mode:target}});
-        const d=raw?.data||raw||{};
-        busy();
-        if(d.ok===false){ toast(d.message||'切换失败', 'error'); }
-        else{ toast('已切换为 '+(d.sign_mode===target?target:'…')+'，语义池已同步', 'success'); }
-        try{ const m=await api('/mode'); render(m?.data||m||{}); }catch(_){}
-      }catch(e){ busy(); toast(e.message||'切换失败', 'error'); }
-      switchBtn.disabled=false;
-    };
-  })();
+  fileInput.addEventListener('change',()=>{ const f=fileInput.files[0]; if(!f)return; const url=URL.createObjectURL(f); image=new Image(); image.onload=()=>{setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4});draw();URL.revokeObjectURL(url);}; image.src=url; });
+  let dragMode=null,dragStart=null,dragRect=null;
+  function canvasPoint(e){const b=canvas.getBoundingClientRect();return{x:(e.clientX-b.left)*canvas.width/Math.max(1,b.width),y:(e.clientY-b.top)*canvas.height/Math.max(1,b.height)};}
+  function sourcePoint(e){const p=canvasPoint(e),s=Number(canvas.dataset.scale||1),ox=Number(canvas.dataset.offsetX||0),oy=Number(canvas.dataset.offsetY||0);return{x:(p.x-ox)/s,y:(p.y-oy)/s};}
+  function hitHandle(p,r){const h=24,hs=[['nw',r.x,r.y],['ne',r.x+r.width,r.y],['sw',r.x,r.y+r.height],['se',r.x+r.width,r.y+r.height]],corner=hs.find(([,x,y])=>Math.abs(p.x-x)<=h&&Math.abs(p.y-y)<=h)?.[0];if(corner)return corner;if(Math.abs(p.x-r.x)<=h&&p.y>=r.y&&p.y<=r.y+r.height)return'w';if(Math.abs(p.x-(r.x+r.width))<=h&&p.y>=r.y&&p.y<=r.y+r.height)return'e';if(Math.abs(p.y-r.y)<=h&&p.x>=r.x&&p.x<=r.x+r.width)return'n';if(Math.abs(p.y-(r.y+r.height))<=h&&p.x>=r.x&&p.x<=r.x+r.width)return's';return null;}
+  function updateCursor(e){if(!image){canvas.style.cursor='default';return;}const h=hitHandle(sourcePoint(e),getRect());canvas.style.cursor=h&&h.length===2?(h==='nw'||h==='se'?'nwse-resize':'nesw-resize'):h?(h==='n'||h==='s'?'ns-resize':'ew-resize'):'move';}
+  canvas.addEventListener('pointerdown',e=>{if(!image)return;const p=sourcePoint(e),rect=getRect(),handle=hitHandle(p,rect);if(handle)dragMode=handle;else if(p.x>=rect.x&&p.x<=rect.x+rect.width&&p.y>=rect.y&&p.y<=rect.y+rect.height)dragMode='move';else return;dragStart=p;dragRect={...rect};canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointermove',e=>{if(!dragMode)updateCursor(e);});
+  canvas.addEventListener('pointermove',e=>{if(!dragMode||!image)return;const p=sourcePoint(e),dx=p.x-dragStart.x,dy=p.y-dragStart.y,r={...dragRect};if(dragMode==='move'){r.x=dragRect.x+dx;r.y=dragRect.y+dy;}else{if(dragMode.includes('w')){r.x=dragRect.x+dx;r.width=dragRect.width-dx;}if(dragMode.includes('e'))r.width=dragRect.width+dx;if(dragMode.includes('n')){r.y=dragRect.y+dy;r.height=dragRect.height-dy;}if(dragMode.includes('s'))r.height=dragRect.height+dy;}r.width=Math.max(16,r.width);r.height=Math.max(16,r.height);r.x=Math.max(0,Math.min(image.width-r.width,r.x));r.y=Math.max(0,Math.min(image.height-r.height,r.y));setRect(r);draw();});
+  canvas.addEventListener('pointerup',e=>{dragMode=null;dragStart=null;dragRect=null;try{canvas.releasePointerCapture(e.pointerId);}catch(_){}}); canvas.addEventListener('pointercancel',()=>{dragMode=null;dragStart=null;dragRect=null;});
+  document.querySelector('#reset').onclick=()=>{if(image)setRect({x:image.width*.2,y:image.height*.3,width:image.width*.6,height:image.height*.4});draw();};
+  document.querySelector('#save').onclick=async()=>{const f=fileInput.files[0];if(!f)return status('请先选择图片',true);const rect=getRect();if(rect.width<16||rect.height<16)return status('牌面宽度和高度不能小于16像素',true);const saveBtn=document.querySelector('#save');saveBtn.disabled=true;const busy=toast('正在上传并保存模板…','info',{sticky:true});try{const uploaded=await uploadFile(f),uploadData=uploaded?.data||uploaded?.result||uploaded,uploadToken=uploadData?.token;if(!uploadToken){console.error('[sign_meme] upload_response_missing_token',{keys:Object.keys(uploadData||{}),request_id:uploadData?.request_id});throw new Error(uploadData?.message||'上传接口未返回令牌');}const d0=await api('/templates',{method:'POST',body:{upload_token:uploadToken,name:document.querySelector('#name').value,description:document.querySelector('#description').value,caption:document.querySelector('#caption').value,tags:document.querySelector('#tags').value,rect}}),d=d0?.data||d0?.result||d0;if(!d?.template)throw new Error(d?.message||'保存失败');busy();toast('模板已保存','success');fileInput.value='';image=null;draw();await load();}catch(e){busy();toast(e.message||'保存失败','error');}finally{saveBtn.disabled=false;}};
+  function formatDate(value){const n=Number(value||0);if(!n)return'更新时间未知';const d=new Date(n*1000);return Number.isNaN(d.getTime())?'更新时间未知':`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;}
+  function searchableText(t){return [t.name,t.description,t.caption,t.original_name,...(Array.isArray(t.tags)?t.tags:[])].join(' ').toLocaleLowerCase();}
+  function getFilteredTemplates(){const query=searchInput.value.trim().toLocaleLowerCase(),state=statusFilter.value;return templatesCache.filter(t=>(!query||searchableText(t).includes(query))&&(state==='all'||(state==='active'?Boolean(t.active):!t.active))).sort((a,b)=>{if(sortSelect.value==='name')return String(a.name||'').localeCompare(String(b.name||''),'zh-CN');if(sortSelect.value==='version')return Number(b.version||0)-Number(a.version||0);return Number(b.updated_at||0)-Number(a.updated_at||0);});}
+  function renderTemplateCards(templates){list.innerHTML=templates.map(t=>`<article class="template-card"><button type="button" class="template-preview template-preview-button" data-full-preview-id="${escapeHtml(t.id)}" aria-label="查看 ${escapeHtml(t.name)} 的完整图片"><span class="template-preview-frame"><span class="preview-placeholder">加载预览…</span><img data-preview-id="${escapeHtml(t.id)}" src="" alt="${escapeHtml(t.name)} 模板预览" hidden></span>${t.active?'<span class="badge badge-active card-status">● 当前激活</span>':'<span class="badge badge-neutral card-status">未激活</span>'}</button><div class="template-content"><div><h3 class="template-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</h3><div class="caption" title="${escapeHtml(t.caption||t.description||'无图片含义')}">${escapeHtml(t.caption||t.description||'无图片含义')}</div></div><div class="tag-list">${(t.tags||[]).length?(t.tags||[]).map(tag=>`<span class="tag" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`).join(''):'<span class="hint">尚未设置标签</span>'}</div><div class="meta-row"><span>${escapeHtml(t.width)}×${escapeHtml(t.height)}</span><span>v${escapeHtml(t.version||1)}</span><span>${formatDate(t.updated_at)}</span></div><div class="card-actions"><button data-id="${escapeHtml(t.id)}" class="${t.active?'secondary':''}" ${t.active?'disabled':''}>${t.active?'已激活':'设为激活'}</button><button data-edit="${escapeHtml(t.id)}" class="secondary">编辑语义</button><button data-delete="${escapeHtml(t.id)}" class="danger" ${t.active?'disabled':''}>删除</button></div></div></article>`).join('');templates.forEach(loadPreview);list.querySelectorAll('[data-full-preview-id]').forEach(b=>b.onclick=()=>openImagePreview(b.dataset.fullPreviewId));list.querySelectorAll('[data-id]').forEach(b=>b.onclick=async()=>{b.disabled=true;await mutate(`/templates/${b.dataset.id}/activate`,{});});list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditDialog(b.dataset.edit));list.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{if(!await confirmDelete('删除此模板？此操作不可恢复。激活模板不可直接删除。'))return;b.disabled=true;await mutate(`/templates/${b.dataset.delete}`,{method:'DELETE'});});}
+  function applyTemplateView(){const filtered=getFilteredTemplates(),total=templatesCache.length,active=templatesCache.filter(t=>t.active).length;document.querySelector('#template-total').textContent=total;document.querySelector('#template-active-total').textContent=active;resultCount.textContent=`显示 ${filtered.length} / ${total} 个模板`;list.hidden=!filtered.length;emptyState.hidden=Boolean(filtered.length);if(filtered.length)renderTemplateCards(filtered);else{list.innerHTML='';document.querySelector('#template-empty-title').textContent=total?'没有匹配的模板':'还没有模板';document.querySelector('#template-empty-copy').textContent=total?'尝试调整关键词或筛选条件。':'从上方新建工作区上传第一张举牌底图。';}}
+  function clearTemplateFilters(){searchInput.value='';statusFilter.value='all';sortSelect.value='updated';applyTemplateView();}
+  async function loadPreview(template){const imageEl=document.querySelector(`[data-preview-id="${template.id}"]`);if(!imageEl)return;try{const raw=await api(`/image/${template.id}/preview`),data=raw?.data||raw?.result||raw;if(!data?.data_url)throw new Error('预览接口未返回图片');imageEl.src=data.data_url;imageEl.hidden=false;imageEl.previousElementSibling?.remove();console.info('[sign_meme] preview_succeeded',{request_id:data.request_id,template_id:template.id});}catch(error){imageEl.hidden=true;const placeholder=imageEl.previousElementSibling;if(placeholder)placeholder.textContent='预览加载失败';console.error('[sign_meme] preview_failed',{template_id:template.id,error:error?.message||String(error)});}}
+  async function openImagePreview(templateId){const t=templatesCache.find(x=>x.id===templateId);if(!t)return status('模板数据未加载，请刷新页面',true);const trigger=document.querySelector(`[data-full-preview-id="${templateId}"]`);if(trigger)trigger.disabled=true;try{const thumbnail=document.querySelector(`[data-preview-id="${templateId}"]`);let src=thumbnail?.src||'';let requestId='cached';if(!src){const raw=await api(`/image/${templateId}/preview`),data=raw?.data||raw?.result||raw;src=data?.data_url||'';requestId=data?.request_id||'unknown';}if(!src)throw new Error('预览接口未返回图片');imagePreviewFull.src=src;imagePreviewFull.alt=`${t.name} 完整图片`;imagePreviewDialog.querySelector('[role="dialog"]').setAttribute('aria-label',`${t.name} 完整图片`);imagePreviewDialog.hidden=false;console.info('[sign_meme] full_preview_opened',{request_id:requestId,template_id:templateId});}catch(e){console.error('[sign_meme] full_preview_failed',{template_id:templateId,error:e?.message||String(e)});toast(e.message||'完整图片预览加载失败','error');}finally{if(trigger)trigger.disabled=false;}}
+  async function load(){try{const raw=await api('/templates'),d=raw?.data||raw?.result||raw;if(!d?.templates)throw new Error(d?.message||'读取失败');templatesCache=d.templates;applyTemplateView();}catch(e){templatesCache=[];list.hidden=true;emptyState.hidden=false;document.querySelector('#template-empty-title').textContent='模板列表加载失败';document.querySelector('#template-empty-copy').textContent=e.message||'未知错误';resultCount.textContent='读取失败';toast('模板列表加载失败：'+(e.message||'未知错误'),'error');}}
+  async function mutate(path,options){try{const busy=toast('正在更新模板…','info',{sticky:true});await api(path,{method:options.method||'POST',body:options.body||{}});busy();toast('模板已更新','success');await load();}catch(e){toast(e.message||'操作失败','error');}}
+  function confirmBox(message,okText,danger=false){return new Promise(resolve=>{const wrap=document.createElement('div');wrap.className='dialog-backdrop';wrap.innerHTML=`<div class="dialog" role="dialog" aria-modal="true" aria-label="操作确认"><p style="margin:0;line-height:1.6">${escapeHtml(message)}</p><div class="dialog-footer"><button data-cancel class="secondary" type="button">取消</button><button data-ok class="${danger?'danger':''}" type="button">${escapeHtml(okText)}</button></div></div>`;document.body.append(wrap);const finish=value=>{wrap.remove();resolve(value);};wrap.onclick=e=>{if(e.target===wrap)finish(false);};wrap.querySelector('[data-cancel]').onclick=()=>finish(false);wrap.querySelector('[data-ok]').onclick=()=>finish(true);});}
+  function confirmDelete(message){return confirmBox(message,'确认删除',true);}
+  function openEditDialog(templateId){const t=templatesCache.find(x=>x.id===templateId);if(!t)return status('模板数据未加载，请刷新页面',true);const wrap=document.createElement('div');wrap.className='dialog-backdrop';wrap.innerHTML=`<div class="dialog" role="dialog" aria-modal="true" aria-label="编辑模板语义"><h3>编辑语义 — ${escapeHtml(t.name)}</h3><p class="hint" style="margin:0 0 12px">保存后自动同步语义池并增量重建向量。</p><label for="edit-caption">图片含义（caption）</label><textarea id="edit-caption" maxlength="1000">${escapeHtml(t.caption||'')}</textarea><label for="edit-tags" style="margin-top:12px">图片标签</label><input id="edit-tags" maxlength="1000" value="${escapeHtml((t.tags||[]).join('，'))}" placeholder="多个标签用逗号分隔"/><label for="edit-name" style="margin-top:12px">模板名称</label><input id="edit-name" maxlength="80" value="${escapeHtml(t.name||'')}"/><p data-err class="dialog-error"></p><div class="dialog-footer"><button data-cancel class="secondary" type="button">取消</button><button data-save type="button">保存修改</button></div></div>`;document.body.append(wrap);const close=()=>wrap.remove(),showErr=msg=>wrap.querySelector('[data-err]').textContent=msg;wrap.onclick=e=>{if(e.target===wrap)close();};wrap.querySelector('[data-cancel]').onclick=close;wrap.querySelector('[data-save]').onclick=async()=>{const caption=wrap.querySelector('#edit-caption').value.trim(),tagsRaw=wrap.querySelector('#edit-tags').value.trim(),name=wrap.querySelector('#edit-name').value.trim();if(!caption)return showErr('图片含义（caption）不能为空：空语义无法进入检索池');if(!name)return showErr('模板名称不能为空');const save=wrap.querySelector('[data-save]');save.disabled=true;try{await api(`/templates/${templateId}`,{method:'PUT',body:{name,caption,tags:tagsRaw,description:t.description||''}});close();toast('已保存，语义池与向量正在同步','success');await load();}catch(e){showErr(e.message||'保存失败');save.disabled=false;}};}
+  [searchInput,statusFilter,sortSelect].forEach(el=>el.addEventListener(el===searchInput?'input':'change',applyTemplateView));document.querySelector('#clear-template-filters').onclick=clearTemplateFilters;document.querySelector('#empty-clear-template-filters').onclick=clearTemplateFilters;
+  draw();load();
+  (async function modeBar(){const cur=document.querySelector('#mode-current'),desc=document.querySelector('#mode-desc'),dot=document.querySelector('#mode-dot'),switchBtn=document.querySelector('#mode-switch'),reconcileBtn=document.querySelector('#mode-reconcile');const render=d=>{const m=d.sign_mode,compat=d.compat_status||'standalone';let label,hint,warning=false;if(m==='integrated'&&compat==='downgraded'){label='对接检索（已降级为独立模式）';hint='未检测到表情包管理器（meme_manager），对接模式当前不可用。'+(d.upstream?.reasons?.length?('原因：'+d.upstream.reasons.join('；')):'');warning=true;}else if(m==='integrated'){label='对接表情包检索';hint=`模板已进入表情包语义检索池：命中后自动生成牌面文字再渲染发送${d.compat_upstream_version?`（meme_manager ${d.compat_upstream_version}）`:''}。`;}else{label='独立使用';hint='本插件自管命中（协议注入+激活模板渲染），不依赖表情包管理器。';}cur.textContent=label;cur.style.color=warning?'var(--warning)':'var(--success)';dot.style.background=warning?'var(--warning)':'var(--success)';switchBtn.textContent=m==='integrated'?'切换为独立模式':'切换为对接检索';};try{const raw=await api('/mode');render(raw?.data||raw||{});}catch(e){toast('运行模式读取失败：'+(e.message||'未知错误'),'error');}reconcileBtn.onclick=async()=>{reconcileBtn.disabled=true;const busy=toast('正在同步语义池…','info',{sticky:true});try{const raw=await api('/mode/reconcile',{method:'POST',body:{}}),d=raw?.data||raw||{};busy();toast('语义池已同步','success');const m=await api('/mode');render(m?.data||m||{});console.info('[sign_meme] mode_reconciled',{reconcile:d.reconcile||d});}catch(e){busy();toast(e.message||'同步失败','error');}finally{reconcileBtn.disabled=false;}};switchBtn.onclick=async()=>{const raw0=await api('/mode').catch(()=>null),cur0=(raw0?.data||raw0||{}).sign_mode||'standalone',target=cur0==='integrated'?'standalone':'integrated',message=target==='integrated'?'切换为对接检索模式？将把举牌模板加入表情包语义检索池。':'切换为独立模式？将把举牌模板从语义检索池移除。';if(!await confirmBox(message,target==='integrated'?'切换为对接检索':'切换为独立模式'))return;switchBtn.disabled=true;const busy=toast('正在切换运行模式…','info',{sticky:true});try{const raw=await api('/mode/reconcile',{method:'POST',body:{sign_mode:target}}),d=raw?.data||raw?.result||raw;busy();if(d.ok===false)toast(d.message||'切换失败','error');else toast('运行模式已切换，语义池已同步','success');const m=await api('/mode');render(m?.data||m||{});}catch(e){busy();toast(e.message||'切换失败','error');}finally{switchBtn.disabled=false;}};})();
 })();
 </script>
 </body>

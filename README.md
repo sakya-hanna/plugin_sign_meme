@@ -35,6 +35,22 @@ astrbot_plugin_sign_meme/
 └── data/                    # 运行时数据(gitignore)
 ```
 
+## 字体（部署必读，2026-09-11）
+
+中文牌面渲染依赖 `fonts/NotoSansSC-Regular.ttf`（10.5MB，gitignore 不入库）。
+**缺失时中文会渲染为方框**（回退链已不含任何中文字体）。部署/重装后执行：
+
+```bash
+mkdir -p fonts && cd fonts
+# 方式一: Google Noto 官方(需代理时走服务器 clash)
+curl -L -o NotoSansSC-Regular.ttf \
+  "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+# 方式二: 从旧部署/备份直接拷贝同名 ttf
+```
+
+容器部署需同步挂载或拷入容器内同路径。校验：管理页任选模板点「测试生成」，
+牌面文字清晰无方框即正常。
+
 防回归要点：
 - `main.py`/`metadata.yaml`/`_conf_schema.json`/`pages/` 的位置是 AstrBot
   加载器与 Plugin Pages 的硬编码约定，不可移动；

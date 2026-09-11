@@ -84,9 +84,26 @@ def parse_sign_response(text: str) -> tuple[str, str] | None:
     return reply.strip(), sign_text.strip()
 
 
+def _effective_mode(plugin) -> str:
+    """统一读"实际生效"模式(H2,2026-09-11)。
+
+    必须走 plugin._effective_sign_mode()(integrated+上游不可用时降级 standalone),
+    而不是配置值 plugin.sign_mode——此前内部 guard 读配置值,导致降级期间
+    main.py 按 effective 派发进来的 standalone 链路又被这里的 guard 挡回去,
+    举牌功能整体静默失效。fake 插件(测试)无该方法时回退配置值。
+    """
+    getter = getattr(plugin, "_effective_sign_mode", None)
+    if callable(getter):
+        try:
+            return str(getter() or "standalone")
+        except Exception:
+            pass
+    return str(getattr(plugin, "sign_mode", "standalone") or "standalone")
+
+
 async def handle_llm_request(plugin, event: AstrMessageEvent, req: ProviderRequest) -> None:
     """独立模式:向主回复请求注入举牌协议。"""
-    if plugin.sign_mode != "standalone":
+    if _effective_mode(plugin) != "standalone":
         return
     current = str(getattr(req, "system_prompt", "") or "")
     if SIGN_PROMPT_MARKER in current:
@@ -112,15 +129,20 @@ async def handle_llm_response(plugin, event: AstrMessageEvent, response) -> None
         return  # 旧链路已处理(migration 期共存)
     text = str(getattr(response, "completion_text", "") or "")
     if SIGN_PROMPT_MARKER not in text and not text.strip().startswith("{"):
-        # 无协议痕迹且非 JSON 形态,快速跳过(协议未注入给本轮的概率高)
-        if "{" not in text[:200]:
+        # 无协议痕迹且非 JSON 形态,快速跳过(协议未注入给本轮的概率高)。
+        # L5(2026-09-11): 窗口放宽到全文首个 '{'。此前只看前 200 字符,
+        # 长回复里 JSON 出现在 200 字符之后时会漏剥离,协议原文发给用户。
+        if "{" not in text:
             return
     structured = parse_sign_response(text)
     if structured is None:
         return
     visible_reply, sign_text = structured
     response.completion_text = visible_reply
-    if plugin.sign_mode == "standalone":
+    # H2: 按实际生效模式写 extra。降级期间(配置 integrated+上游不可用)
+    # effective=standalone → 写 EXTRA_SIGN_TEXT 供 standalone 渲染链消费;
+    # 写错 key 会导致降级轮解析出了牌面文字却永远无人渲染。
+    if _effective_mode(plugin) == "standalone":
         event.set_extra(EXTRA_SIGN_TEXT, sign_text)
         logger.info("[sign_meme] standalone 解析结构化回复 sign_text=%s", bool(sign_text))
     else:
@@ -134,7 +156,7 @@ async def handle_llm_response(plugin, event: AstrMessageEvent, response) -> None
 
 async def handle_decorating_result(plugin, event: AstrMessageEvent) -> None:
     """独立模式:渲染激活模板并把成品图追加到消息链。"""
-    if plugin.sign_mode != "standalone":
+    if _effective_mode(plugin) != "standalone":
         return
     sign_text = str(event.get_extra(EXTRA_SIGN_TEXT) or "").strip()
     if not sign_text:

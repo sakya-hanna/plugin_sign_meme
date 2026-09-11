@@ -34,6 +34,10 @@ class SignMemeService:
     MAX_TEXT_LENGTH = 40
     MAX_TEMPLATES = 100
     ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+    # H3(2026-09-11): staging 上传残留 / generated 临时成品图的 TTL 兜底。
+    # 正常路径各自消费(consume_upload/cleanup),失败路径(放弃保存、进程中断、
+    # 钩子未触发)曾永久残留——实测 staging 2 个陈旧文件、generated 5 个孤儿。
+    TTL_SECONDS = 24 * 3600
 
     def __init__(self, data_dir: str | Path, logger_: logging.Logger | None = None):
         self.data_dir = Path(data_dir).resolve()
@@ -305,14 +309,16 @@ class SignMemeService:
             "updated_at": int(time.time()),
             "version": int(item.get("version", 1)) + 1,
         })
-        self._write_db(data)
-        updated = self.get_template(template_id)  # type: ignore[assignment]
+        # M2(2026-09-11): 镜像同步成功后才落 DB。此前先写 DB 再 sync,
+        # sync 失败时 DB 已是新值而镜像/语义池停在旧值,直到下次成功保存才收敛。
         try:
             self.meme_manager_mirror.sync(item, self._resolve_path(str(item["relative_path"])))
         except Exception as exc:
             self.logger.error("event=template_mirror_failed template_id=%s operation=update error=%s", template_id, type(exc).__name__, exc_info=True)
             raise SignMemeError("mirror_failed", "模板目录同步失败") from exc
+        self._write_db(data)
         self.logger.info("event=template_mirror_succeeded template_id=%s pack_id=sign-meme-templates operation=update", template_id)
+        updated = self.get_template(template_id)  # type: ignore[assignment]
         self._pool_sync_template(item)
         self.logger.info("event=template_updated template_id=%s version=%s", template_id, item["version"])
         return updated  # type: ignore[return-value]
@@ -329,13 +335,15 @@ class SignMemeService:
                 item["updated_at"] = int(time.time())
         if not found:
             raise SignMemeError("not_found", "模板不存在")
-        self._write_db(data)
+        # M2(2026-09-11): 全部镜像同步成功后才落 DB,避免部分同步后 DB 独走。
+        # (mirror.sync 自带 snapshot/rollback,单条失败会还原该条镜像。)
         try:
             for item in data["templates"]:
                 self.meme_manager_mirror.sync(item, self._resolve_path(str(item["relative_path"])))
         except Exception as exc:
             self.logger.error("event=template_mirror_failed template_id=%s operation=activate error=%s", template_id, type(exc).__name__, exc_info=True)
             raise SignMemeError("mirror_failed", "模板目录同步失败") from exc
+        self._write_db(data)
         self.logger.info("event=template_mirror_succeeded template_id=%s pack_id=sign-meme-templates operation=activate", template_id)
         self.logger.info("event=template_activated template_id=%s", template_id)
         return self.get_template(template_id)  # type: ignore[return-value]
@@ -379,15 +387,26 @@ class SignMemeService:
         }
 
     def _font(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        # L4(2026-09-11): 字体对象缓存。此前每次渲染每个字号都重新
+        # truetype() 加载(最多 ~40 次/渲染),全启发式循环里纯属重复 IO。
+        cache = getattr(self, "_font_cache", None)
+        if cache is None:
+            cache = self._font_cache = {}
+        if size in cache:
+            return cache[size]
         candidates = [
             self.font_path,
             Path(__file__).resolve().parent.parent / "fonts" / "NotoSansSC-Regular.ttf",
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         ]
+        font: ImageFont.FreeTypeFont | ImageFont.ImageFont
         for path in candidates:
             if path.exists():
-                return ImageFont.truetype(str(path), size=size)
-        return ImageFont.load_default()
+                font = ImageFont.truetype(str(path), size=size)
+                cache[size] = font
+                return font
+        font = ImageFont.load_default()
+        cache[size] = font
+        return font
 
     @staticmethod
     def _homography(src: list[tuple[float, float]], dst: list[tuple[float, float]]) -> tuple[float, ...]:
@@ -600,6 +619,36 @@ class SignMemeService:
         except Exception as exc:
             self.logger.error("event=temporary_cleanup_failed path=%s error=%s", path, exc, exc_info=True)
             return False
+
+    def sweep_expired(self, *, max_age_seconds: int | None = None) -> dict[str, int]:
+        """H3 TTL 兜底:清扫 staging/ 与 generated/ 中超过时限的残留文件。
+
+        只动这两个临时目录,templates/saved 永不触碰。启动时与每次
+        after_message_sent 顺带调用(见 main.py),失败只记日志不抛。
+        """
+        max_age = self.TTL_SECONDS if max_age_seconds is None else max_age_seconds
+        now = time.time()
+        removed = {"staging": 0, "generated": 0}
+        for name in ("staging", "generated"):
+            directory = self.staging_dir if name == "staging" else self.temp_dir
+            try:
+                for f in directory.iterdir():
+                    if not f.is_file():
+                        continue
+                    try:
+                        if now - f.stat().st_mtime > max_age:
+                            f.unlink()
+                            removed[name] += 1
+                    except OSError:
+                        continue
+            except OSError:
+                continue
+        if any(removed.values()):
+            self.logger.info(
+                "event=expired_temp_swept staging=%d generated=%d max_age_seconds=%d",
+                removed["staging"], removed["generated"], max_age,
+            )
+        return removed
 
     def get_image_path(self, template_id: str) -> Path:
         item = self.get_template(template_id)

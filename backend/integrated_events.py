@@ -327,13 +327,13 @@ async def on_decorating_result_first(plugin, event: AstrMessageEvent) -> None:
     # 有举牌成品图待追加: 此时才兜底清空,防止官方 decorating 再次消费举牌候选。
     event.set_extra(UPSTREAM_SELECTED_IDS, None)
     event.set_extra(UPSTREAM_DEFAULT_ID, None)
-    event.set_extra(EXTRA_RENDERED_PATH, None)
     try:
         from astrbot.core.message.components import Image
 
         result_obj = event.get_result()
         if result_obj is None:
             logger.warning("[sign_meme][integrated] 无可附加的结果链,跳过发图")
+            await _discard_rendered(plugin, event, path)
             return
         image = Image.fromFileSystem(path)
         chain = getattr(result_obj, "chain", None)
@@ -341,13 +341,31 @@ async def on_decorating_result_first(plugin, event: AstrMessageEvent) -> None:
             result_obj.chain = chain + [image]
         else:
             result_obj.chain = [image]
-        logger.info(
-            "[sign_meme][integrated] 举牌成品图已追加 request_id=%s",
-            event.get_extra(EXTRA_RENDERED_REQUEST_ID) or "",
-        )
     except Exception as exc:
         logger.error(
             "[sign_meme][integrated] 附加图片失败 error=%s", exc, exc_info=True
+        )
+        await _discard_rendered(plugin, event, path)
+        return
+    # H1 回归(2026-09-11): 追加成功后必须保留 EXTRA_RENDERED_PATH——
+    # after_message_sent 靠它找到临时文件来清理(消费时自行置空)。
+    # 此前 decorating 在追加前置空 → 清理永远读空 → 每轮泄漏 ~1.1MB
+    # (generated/ 实测堆积 5 个孤儿 PNG 共 5.7MB)。
+    logger.info(
+        "[sign_meme][integrated] 举牌成品图已追加 request_id=%s",
+        event.get_extra(EXTRA_RENDERED_REQUEST_ID) or "",
+    )
+
+
+async def _discard_rendered(plugin, event: AstrMessageEvent, path: str) -> None:
+    """追加失败的兜底: 立即清理临时文件并清掉待清理标记,不留泄漏。"""
+    event.set_extra(EXTRA_RENDERED_PATH, None)
+    event.set_extra(EXTRA_RENDERED_REQUEST_ID, None)
+    try:
+        await plugin.cleanup_generated(path)
+    except Exception as exc:
+        logger.error(
+            "[sign_meme][integrated] 失败路径临时图清理失败 path=%s error=%s", path, exc
         )
 
 
